@@ -1,0 +1,41 @@
+# Dependencies
+node_modules
+
+# Build output
+/dist
+/build
+/package
+/.svelte-kit
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Rust / Tauri
+/src-tauri/target
+/src-tauri/gen/schemas
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / runtime dumps - the session cookie lives in app_data_dir at runtime,
+# but never allow a captured credential or raw API dump to be staged from the tree.
+session.dat
+*.dat
+raw_dump.json
+*_dump.json
+
+# Tauri updater signing key - the private key must never be committed. It is generated
+# to ~/.tauri (outside the repo); this guards against an in-tree copy.
+*.key
+.tauri/
+
+# Claude local files (memory + private instructions) - never commit
+.claude/
+CLAUDE.md

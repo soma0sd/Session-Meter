@@ -1,0 +1,201 @@
+// Lightweight, dependency-free i18n for the Svelte MPA windows.
+// Korean + English. The effective locale is resolved by Rust (OS locale when "auto")
+// and pushed in via setLocale(); each window boots with a best-effort default.
+import { writable, derived, type Readable } from "svelte/store";
+
+export type Locale = "ko" | "en";
+type Dict = Record<string, string>;
+
+const en: Dict = {
+  "app.name": "SessionMeter",
+
+  "common.settings": "Settings",
+  "common.stats": "Statistics",
+  "common.close": "Close",
+  "common.minimize": "Minimize",
+  "common.loading": "Loading...",
+  "common.remaining": "remaining",
+  "common.used": "used",
+  "common.resetsIn": "resets in {time}",
+  "common.today": "Today",
+  "common.tomorrow": "Tomorrow",
+  "common.notLoggedIn": "Not signed in",
+  "common.sessionExpired": "Session expired - please sign in again",
+
+  "bucket.five_hour": "Current session",
+  "bucket.seven_day": "Weekly session",
+  "bucket.seven_day_opus": "Weekly (Opus)",
+
+  "menu.widget": "Show / hide widget",
+  "menu.stats": "Statistics",
+  "menu.settings": "Settings",
+  "menu.quit": "Quit SessionMeter",
+
+  "widget.alwaysOnTop": "Always on top",
+  "widget.moveLock": "Lock position",
+
+  "settings.title": "Settings",
+  "settings.section.general": "General",
+  "settings.section.widget": "Widget",
+  "settings.section.notifications": "Notifications",
+  "settings.section.account": "Account",
+  "settings.theme": "Theme",
+  "settings.theme.system": "System",
+  "settings.theme.light": "Light",
+  "settings.theme.dark": "Dark",
+  "settings.language": "Language",
+  "settings.language.auto": "Auto (OS)",
+  "settings.language.ko": "Korean",
+  "settings.language.en": "English",
+  "settings.refreshInterval": "Refresh interval",
+  "settings.autostart": "Launch at startup",
+  "settings.trayDisplay": "Tray shows",
+  "settings.widgetOpacity": "Widget opacity",
+  "settings.notify.enabled": "Enable notifications",
+  "settings.notify.onReset": "Notify on reset",
+  "settings.signIn": "Sign in to Claude",
+  "settings.signOut": "Sign out",
+  "settings.loggedInAs": "Signed in: {org}",
+  "settings.signedOut": "Not signed in",
+  "settings.signingIn": "Waiting for sign-in...",
+  "settings.about": "About",
+  "settings.version": "Version",
+  "settings.notify.thresholdsNote": "Alerts at 80% and 95% used",
+  "settings.trayShowsWindow": "Tray window",
+  "settings.section.update": "Updates",
+  "update.check": "Check for updates",
+  "update.checking": "Checking...",
+  "update.current": "Current: v{version}",
+  "update.upToDate": "You're up to date",
+  "update.available": "New version {version} available",
+  "update.install": "Install now",
+  "update.installing": "Installing...",
+  "update.news": "What's new",
+  "update.newsHint": "View the changelog",
+  "news.title": "What's New",
+  "menu.update": "Install v{version}",
+  "widget.update": "Update to v{version}",
+  "unit.minutes": "{n} min",
+
+  "stats.title": "Usage statistics",
+  "stats.forecast": "Depletion forecast",
+  "stats.history": "History",
+  "stats.resetSchedule": "Reset schedule",
+  "stats.forecast.stable": "Stable at the current rate",
+  "stats.forecast.empties": "Empties in ~{time}",
+  "stats.forecast.beforeReset": "before reset",
+  "stats.forecast.safe": "Resets before depletion",
+  "stats.noHistory": "Not enough history yet",
+  "stats.col.window": "Window",
+  "stats.col.resetsAt": "Resets at",
+  "stats.col.in": "In",
+  "stats.used": "used",
+};
+
+const ko: Dict = {
+  "app.name": "SessionMeter",
+
+  "common.settings": "설정",
+  "common.stats": "통계",
+  "common.close": "닫기",
+  "common.minimize": "최소화",
+  "common.loading": "불러오는 중...",
+  "common.remaining": "남음",
+  "common.used": "사용",
+  "common.resetsIn": "{time} 후 초기화",
+  "common.today": "오늘",
+  "common.tomorrow": "내일",
+  "common.notLoggedIn": "로그인 필요",
+  "common.sessionExpired": "세션 만료 - 다시 로그인하세요",
+
+  "bucket.five_hour": "이번 세션",
+  "bucket.seven_day": "주간 세션",
+  "bucket.seven_day_opus": "주간 (Opus)",
+
+  "menu.widget": "위젯 표시 / 숨김",
+  "menu.stats": "통계",
+  "menu.settings": "설정",
+  "menu.quit": "SessionMeter 종료",
+
+  "widget.alwaysOnTop": "항상 위",
+  "widget.moveLock": "위치 잠금",
+
+  "settings.title": "설정",
+  "settings.section.general": "일반",
+  "settings.section.widget": "위젯",
+  "settings.section.notifications": "알림",
+  "settings.section.account": "계정",
+  "settings.theme": "테마",
+  "settings.theme.system": "시스템",
+  "settings.theme.light": "라이트",
+  "settings.theme.dark": "다크",
+  "settings.language": "언어",
+  "settings.language.auto": "자동 (OS)",
+  "settings.language.ko": "한국어",
+  "settings.language.en": "English",
+  "settings.refreshInterval": "갱신 주기",
+  "settings.autostart": "시작 시 실행",
+  "settings.trayDisplay": "트레이 표시",
+  "settings.widgetOpacity": "위젯 투명도",
+  "settings.notify.enabled": "알림 사용",
+  "settings.notify.onReset": "초기화 시 알림",
+  "settings.signIn": "Claude 로그인",
+  "settings.signOut": "로그아웃",
+  "settings.loggedInAs": "로그인됨: {org}",
+  "settings.signedOut": "로그인되지 않음",
+  "settings.signingIn": "로그인 대기 중...",
+  "settings.about": "정보",
+  "settings.version": "버전",
+  "settings.notify.thresholdsNote": "80%, 95% 사용 시 알림",
+  "settings.trayShowsWindow": "트레이 창",
+  "settings.section.update": "업데이트",
+  "update.check": "업데이트 확인",
+  "update.checking": "확인 중...",
+  "update.current": "현재: v{version}",
+  "update.upToDate": "최신 버전입니다",
+  "update.available": "새 버전 {version} 있음",
+  "update.install": "지금 설치",
+  "update.installing": "설치 중...",
+  "update.news": "업데이트 소식",
+  "update.newsHint": "변경 로그 보기",
+  "news.title": "업데이트 소식",
+  "menu.update": "v{version} 설치",
+  "widget.update": "v{version} 업데이트",
+  "unit.minutes": "{n}분",
+
+  "stats.title": "사용 통계",
+  "stats.forecast": "소진 예측",
+  "stats.history": "이력",
+  "stats.resetSchedule": "초기화 일정",
+  "stats.forecast.stable": "현재 속도로는 안정적",
+  "stats.forecast.empties": "약 {time} 후 소진",
+  "stats.forecast.beforeReset": "초기화 전",
+  "stats.forecast.safe": "소진 전 초기화",
+  "stats.noHistory": "이력이 아직 부족합니다",
+  "stats.col.window": "항목",
+  "stats.col.resetsAt": "초기화 시각",
+  "stats.col.in": "남은 시간",
+  "stats.used": "사용",
+};
+
+const dicts: Record<Locale, Dict> = { en, ko };
+
+export const locale = writable<Locale>("en");
+
+export function setLocale(l: Locale): void {
+  locale.set(l);
+}
+
+export type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+export const t: Readable<TFn> = derived(locale, ($l) => {
+  return (key: string, vars?: Record<string, string | number>): string => {
+    let s = dicts[$l][key] ?? dicts.en[key] ?? key;
+    if (vars) {
+      for (const [k, v] of Object.entries(vars)) {
+        s = s.replaceAll(`{${k}}`, String(v));
+      }
+    }
+    return s;
+  };
+});
