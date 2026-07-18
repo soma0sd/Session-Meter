@@ -21,7 +21,7 @@
     for (const block of md.split(/\n## /)) {
       const nl = block.indexOf("\n");
       const header = (nl >= 0 ? block.slice(0, nl) : block).trim();
-      const m = header.match(/\[?(\d+\.\d+\.\d+)\]?\s*-\s*(.+)/);
+      const m = header.match(/\[?(\d+\.\d+(?:\.\d+)?)\]?\s*-\s*(.+)/);
       if (!m) continue;
       const lines = [...block.matchAll(/^[-*]\s+(.+)$/gm)].map((x) =>
         x[1].replace(/\*\*/g, "").replace(/`/g, "").trim(),
