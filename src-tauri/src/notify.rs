@@ -30,8 +30,6 @@ pub fn evaluate(app: &AppHandle, snapshot: &UsageSnapshot) {
     };
     let settings = state.settings.lock().unwrap().clone();
     let loc = i18n::effective_locale(&settings.language);
-    let mut thresholds = settings.notify.thresholds.clone();
-    thresholds.sort_unstable();
     let now_ts = time::OffsetDateTime::now_utc().unix_timestamp();
 
     let mut ns = state.notify_state.lock().unwrap();
@@ -61,16 +59,16 @@ pub fn evaluate(app: &AppHandle, snapshot: &UsageSnapshot) {
             }
         }
 
-        // Threshold crossing on used%.
+        // Threshold crossing on used%, using the per-window threshold (session vs weekly).
+        let threshold = if b.key == "five_hour" {
+            settings.notify.session_threshold
+        } else {
+            settings.notify.weekly_threshold
+        };
         let used = b.utilization;
         let already = ns.notified.get(key).copied().unwrap_or(0);
-        let crossed = thresholds
-            .iter()
-            .copied()
-            .filter(|&tsh| used >= tsh && already < tsh)
-            .max();
-        if let Some(highest) = crossed {
-            ns.notified.insert(key.clone(), highest);
+        if threshold > 0 && used >= threshold && already < threshold {
+            ns.notified.insert(key.clone(), threshold);
             if settings.notify.enabled {
                 send(
                     app,

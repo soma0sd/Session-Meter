@@ -31,8 +31,9 @@
     always_on_top: true,
     move_lock: false,
     tray_display: "remaining",
-    tray_bucket: "five_hour",
-    notify: { enabled: true, thresholds: [80, 95], on_reset: true },
+    widget_layout: "detailed",
+    widget_visible: true,
+    notify: { enabled: true, session_threshold: 80, weekly_threshold: 80, on_reset: true },
     history_retention_days: 30,
     org_name: "",
     account_email: "",
@@ -196,6 +197,7 @@
   }
 
   const intervals = [1, 5, 10, 15, 30];
+  const thresholds = [50, 60, 70, 80, 90, 95];
 </script>
 
 <div class="win">
@@ -281,16 +283,16 @@
     </div>
 
     <div class="row">
-      <label for="bucket">{$t("settings.trayShowsWindow")}</label>
+      <label for="layout">{$t("settings.widgetLayout")}</label>
       <select
-        id="bucket"
-        value={s.tray_bucket}
+        id="layout"
+        value={s.widget_layout}
         onchange={(e) => {
-          s.tray_bucket = e.currentTarget.value as "five_hour" | "weekly";
+          s.widget_layout = e.currentTarget.value as "detailed" | "compact";
           save();
         }}>
-        <option value="five_hour">{$t("bucket.five_hour")}</option>
-        <option value="weekly">{$t("bucket.seven_day")}</option>
+        <option value="detailed">{$t("settings.layout.detailed")}</option>
+        <option value="compact">{$t("settings.layout.compact")}</option>
       </select>
     </div>
 
@@ -339,17 +341,47 @@
         }} />
     </div>
     <div class="row">
-      <label for="onreset">{$t("settings.notify.onReset")}</label>
+      <label for="onreset" class:dim={!s.notify.enabled}>{$t("settings.notify.onReset")}</label>
       <input
         id="onreset"
         type="checkbox"
         checked={s.notify.on_reset}
+        disabled={!s.notify.enabled}
         onchange={(e) => {
           s.notify.on_reset = e.currentTarget.checked;
           save();
         }} />
     </div>
-    <div class="note">{$t("settings.notify.thresholdsNote")}</div>
+    <div class="row">
+      <label for="sesTh" class:dim={!s.notify.enabled}>{$t("settings.notify.sessionThreshold")}</label>
+      <select
+        id="sesTh"
+        disabled={!s.notify.enabled}
+        value={String(s.notify.session_threshold)}
+        onchange={(e) => {
+          s.notify.session_threshold = Number(e.currentTarget.value);
+          save();
+        }}>
+        {#each thresholds as n (n)}
+          <option value={String(n)}>{n}%</option>
+        {/each}
+      </select>
+    </div>
+    <div class="row">
+      <label for="wkTh" class:dim={!s.notify.enabled}>{$t("settings.notify.weeklyThreshold")}</label>
+      <select
+        id="wkTh"
+        disabled={!s.notify.enabled}
+        value={String(s.notify.weekly_threshold)}
+        onchange={(e) => {
+          s.notify.weekly_threshold = Number(e.currentTarget.value);
+          save();
+        }}>
+        {#each thresholds as n (n)}
+          <option value={String(n)}>{n}%</option>
+        {/each}
+      </select>
+    </div>
   </section>
 
   <section>
@@ -405,6 +437,10 @@
     display: flex;
     flex-direction: column;
     gap: 9px;
+    padding: 13px 15px;
+    border: 1px solid rgb(var(--border));
+    border-radius: 11px;
+    background: rgb(var(--panel));
   }
   h2 {
     margin: 0 0 2px;
@@ -458,10 +494,15 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 11px 13px;
-    border: 1px solid rgb(var(--border));
-    border-radius: 10px;
-    background: rgb(var(--panel));
+  }
+  .dim {
+    color: rgb(var(--fg-muted));
+    opacity: 0.6;
+  }
+  select:disabled,
+  input:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .status {
     font-size: 0.82rem;
@@ -513,10 +554,6 @@
   .btn:disabled {
     opacity: 0.6;
     cursor: default;
-  }
-  .note {
-    font-size: 0.72rem;
-    color: rgb(var(--fg-muted));
   }
   footer {
     display: flex;

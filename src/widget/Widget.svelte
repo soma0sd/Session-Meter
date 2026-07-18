@@ -17,10 +17,14 @@
     type UsageSnapshot,
     type Settings,
     type UpdateInfo,
+    type Bucket,
   } from "../lib/ipc";
   import { formatCountdown, formatResetDateTime } from "../lib/countdown";
 
   const WIDGET_W = 252;
+  // Compact packs two fixed-size donuts, so it uses a narrower window - this halves the
+  // side margins without changing the donut size or the gap between them.
+  const WIDGET_W_COMPACT = 220;
 
   const PIN = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h6M9.2 2.5v4.7l2.3 2.8H4.5L6.8 7.2V2.5M8 10v3.5"/></svg>`;
   const LOCK = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.3" rx="1.2"/><path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.8 0V7"/></svg>`;
@@ -33,6 +37,7 @@
   let alwaysOnTop = $state(true);
   let moveLocked = $state(false);
   let displayMode = $state<"remaining" | "used">("remaining");
+  let layout = $state<"detailed" | "compact">("detailed");
   let now = $state(Date.now());
   let updateInfo = $state<UpdateInfo | null>(null);
   let updating = $state(false);
@@ -46,6 +51,7 @@
     alwaysOnTop = s.always_on_top;
     moveLocked = s.move_lock;
     displayMode = s.tray_display;
+    layout = (s.widget_layout as "detailed" | "compact") ?? "detailed";
     applyTheme(s.theme as Theme);
     document.documentElement.style.setProperty("--panel-alpha", String(s.widget_opacity));
   }
@@ -55,13 +61,20 @@
     if (!panelEl) return;
     const h = Math.ceil(panelEl.getBoundingClientRect().height);
     if (h < 40) return;
+    const w = layout === "compact" ? WIDGET_W_COMPACT : WIDGET_W;
     try {
       const { LogicalSize } = await import("@tauri-apps/api/dpi");
-      await getCurrentWindow().setSize(new LogicalSize(WIDGET_W, h));
+      await getCurrentWindow().setSize(new LogicalSize(w, h));
     } catch {
       /* not in Tauri */
     }
   }
+
+  // Re-fit the window (including its width, for compact) whenever the layout changes.
+  $effect(() => {
+    layout;
+    void fitWindowHeight();
+  });
 
   onMount(async () => {
     await initWindow();
@@ -90,6 +103,10 @@
       unlisteners.push(
         await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
       );
+      // The window is sized in logical px (DPI-independent), so it keeps the same apparent
+      // size across HD..4K. Re-fit when the scale factor changes (e.g. dragged to another
+      // monitor) so the logical size is re-asserted for the new DPI.
+      unlisteners.push(await getCurrentWindow().onScaleChanged(() => void fitWindowHeight()));
     } catch {
       /* preview */
     }
@@ -172,12 +189,31 @@
         ? "rgb(var(--warn))"
         : "rgb(var(--ok))";
   }
+
+  // --- compact (donut) layout ---
+  const DONUT_R = 40;
+  const DONUT_CIRC = 2 * Math.PI * DONUT_R;
+  function donutDash(shown: number): string {
+    const on = (Math.max(0, Math.min(100, shown)) / 100) * DONUT_CIRC;
+    return `${on} ${DONUT_CIRC - on}`;
+  }
+  // Compact mode shows the current session + weekly on one row; fall back to the first two
+  // buckets if those exact keys are absent.
+  const compactBuckets = $derived.by(() => {
+    const pick = [
+      buckets.find((b) => b.key === "five_hour"),
+      buckets.find((b) => b.key === "seven_day"),
+    ].filter(Boolean) as Bucket[];
+    return pick.length ? pick : buckets.slice(0, 2);
+  });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="panel" bind:this={panelEl} onmousedown={startDrag}>
+<div class="panel" class:compact={layout === "compact"} bind:this={panelEl} onmousedown={startDrag}>
   <header>
-    <span class="title">{$t("app.name")}</span>
+    {#if layout !== "compact"}
+      <span class="title">{$t("app.name")}</span>
+    {/if}
     <div class="tools">
       {#if updateInfo?.available}
         <button
@@ -217,6 +253,34 @@
   {:else if snap.status !== "ok"}
     <div class="empty">
       {snap.status === "unauthorized" ? $t("common.sessionExpired") : $t("common.notLoggedIn")}
+    </div>
+  {:else if layout === "compact"}
+    <div class="donuts">
+      {#each compactBuckets as b (b.key)}
+        {@const shown = displayMode === "remaining" ? b.remaining : b.utilization}
+        {@const remainMs = Math.max(0, Date.parse(b.resets_at) - now)}
+        <div class="donut">
+          <svg class="ring" viewBox="0 0 100 100">
+            <circle class="track" cx="50" cy="50" r={DONUT_R} />
+            {#if shown > 0}
+              <circle
+                class="value"
+                cx="50"
+                cy="50"
+                r={DONUT_R}
+                stroke={barColor(b.remaining)}
+                stroke-dasharray={donutDash(shown)}
+                transform="rotate(-90 50 50)" />
+            {/if}
+            <text class="num" x="50" y="45" text-anchor="middle" dominant-baseline="central"
+              >{shown}%</text>
+            {#if b.resets_at}
+              <text class="sub" x="50" y="70" text-anchor="middle" dominant-baseline="central"
+                >{formatCountdown(remainMs, $locale)}</text>
+            {/if}
+          </svg>
+        </div>
+      {/each}
     </div>
   {:else}
     <div class="rows">
@@ -272,6 +336,12 @@
   .tools {
     display: flex;
     gap: 2px;
+    /* Keep the tools right-aligned even when the title is hidden (compact mode). */
+    margin-left: auto;
+  }
+  /* Compact mode: trim the outer padding so the side margins match the inter-donut gap. */
+  .panel.compact {
+    padding: 7px 6px 8px;
   }
   .tool {
     display: grid;
@@ -344,6 +414,49 @@
     font-size: 0.66rem;
     color: rgb(var(--fg-muted));
     font-variant-numeric: tabular-nums;
+  }
+  .donuts {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+  }
+  .donut {
+    display: flex;
+  }
+  .ring {
+    display: block;
+    width: 84px;
+    height: 84px;
+  }
+  .ring .track {
+    fill: none;
+    stroke: rgb(var(--track));
+    stroke-width: 11;
+  }
+  .ring .value {
+    fill: none;
+    stroke-width: 11;
+    stroke-linecap: round;
+    transition: stroke-dasharray 0.4s ease;
+  }
+  .ring .num {
+    fill: rgb(var(--fg));
+    font-size: 24px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .ring .sub {
+    fill: rgb(var(--fg));
+    font-size: 17px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Halo in the panel colour so the numbers stay readable where they cross the ring. */
+  .ring .num,
+  .ring .sub {
+    paint-order: stroke;
+    stroke: rgb(var(--panel));
+    stroke-width: 3.5px;
+    stroke-linejoin: round;
   }
   .empty {
     text-align: center;

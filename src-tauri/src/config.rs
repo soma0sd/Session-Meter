@@ -4,17 +4,21 @@
 //! On Windows the file is encrypted at rest with DPAPI (per-user scope); on other
 //! platforms it is a user-scoped plaintext file. See the SESSION_FILE comment.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_store::StoreExt;
 
 use crate::error::AppError;
 
-const STORE_FILE: &str = "settings.json";
-const STORE_KEY: &str = "settings";
-const POS_KEY: &str = "widget_pos";
+// Persisted with direct atomic file writes (write a temp file, then rename over the target)
+// so a hard process exit during an update install can never leave a half-written or
+// truncated file. The widget position lives in its OWN file so the frequently-written
+// position never shares a file with (and so can never clobber) the settings.
+const SETTINGS_FILE: &str = "settings.json";
+const WINDOW_FILE: &str = "window.json";
 
 // The session cookie is stored as a file in the per-user app data dir. The OS keyring
 // (Windows Credential Manager) caps a credential blob at ~2560 bytes, which the full
@@ -27,7 +31,10 @@ const SESSION_FILE: &str = "session.dat";
 #[serde(default)]
 pub struct NotifySettings {
     pub enabled: bool,
-    pub thresholds: Vec<u8>,
+    /// Alert when the 5-hour session's used% reaches this.
+    pub session_threshold: u8,
+    /// Alert when the weekly window's used% reaches this.
+    pub weekly_threshold: u8,
     pub on_reset: bool,
 }
 
@@ -35,7 +42,8 @@ impl Default for NotifySettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            thresholds: vec![80, 95],
+            session_threshold: 80,
+            weekly_threshold: 80,
             on_reset: true,
         }
     }
@@ -50,8 +58,9 @@ pub struct Settings {
     pub refresh_interval_min: u64,
     pub always_on_top: bool,
     pub move_lock: bool,
-    pub tray_display: String, // remaining | used
-    pub tray_bucket: String,  // five_hour | weekly
+    pub tray_display: String,  // remaining | used
+    pub widget_layout: String, // detailed | compact
+    pub widget_visible: bool,  // desired widget visibility (watchdog keeps the window in sync)
     pub notify: NotifySettings,
     pub history_retention_days: u32,
     pub org_name: String,
@@ -68,7 +77,8 @@ impl Default for Settings {
             always_on_top: true,
             move_lock: false,
             tray_display: "remaining".to_string(),
-            tray_bucket: "five_hour".to_string(),
+            widget_layout: "detailed".to_string(),
+            widget_visible: true,
             notify: NotifySettings::default(),
             history_retention_days: 30,
             org_name: String::new(),
@@ -77,49 +87,113 @@ impl Default for Settings {
     }
 }
 
+fn data_dir(app: &AppHandle) -> Option<PathBuf> {
+    let base = app.path().app_data_dir().ok()?;
+    // Debug builds keep their settings/window state in a subfolder so running `tauri dev`
+    // never clears or overwrites the installed release app's data in the same dir. (The
+    // session cookie is intentionally left shared so a dev run stays signed in.)
+    #[cfg(debug_assertions)]
+    let base = base.join("dev");
+    Some(base)
+}
+
+/// Atomically write JSON to `path`: serialize to a sibling temp file, then rename over the
+/// target. `fs::rename` replaces the destination in a single step (MoveFileEx on Windows),
+/// so a crash or hard process exit leaves either the old or the new complete file, never a
+/// half-written one.
+fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), AppError> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| AppError::Other(e.to_string()))?;
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    // A unique temp name per write so concurrent savers (the UI thread and the poller
+    // thread) never share a temp file: each writes its own complete file, then the atomic
+    // rename publishes it (last writer wins, but the target is always a whole valid file).
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp{seq}"));
+    fs::write(&tmp, &bytes).map_err(|e| AppError::Other(e.to_string()))?;
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        AppError::Other(e.to_string())
+    })
+}
+
+fn read_json_file<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    serde_json::from_slice(&fs::read(path).ok()?).ok()
+}
+
 pub fn load(app: &AppHandle) -> Settings {
-    match app.store(STORE_FILE) {
-        Ok(store) => store
-            .get(STORE_KEY)
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default(),
-        Err(_) => Settings::default(),
+    let Some(dir) = data_dir(app) else {
+        return Settings::default();
+    };
+    let path = dir.join(SETTINGS_FILE);
+    let Ok(bytes) = fs::read(&path) else {
+        return Settings::default(); // no file yet -> first run
+    };
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Settings::default();
+    }
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        // Not valid JSON (e.g. a truncated write): keep a copy for recovery instead of
+        // silently replacing it with defaults, which the next save would overwrite for good.
+        backup_corrupt(&path, &dir);
+        return Settings::default();
+    };
+    // Current format is the flat Settings object; also accept (and migrate the widget
+    // position out of) the legacy shape { "settings": {..}, "widget_pos": {..} }.
+    let legacy = v.get("settings").filter(|x| x.is_object()).cloned();
+    if legacy.is_some() {
+        migrate_widget_pos(app, &dir, &v);
+    }
+    match serde_json::from_value::<Settings>(legacy.unwrap_or(v)) {
+        Ok(s) => s,
+        Err(_) => {
+            // Valid JSON but the wrong shape (e.g. a hand-edit with a mistyped field): back
+            // it up rather than silently discarding the user's settings.
+            backup_corrupt(&path, &dir);
+            Settings::default()
+        }
     }
 }
 
-/// Reset persisted settings to defaults (used in debug builds so each dev run starts clean).
-pub fn clear_settings(app: &AppHandle) {
-    if let Ok(store) = app.store(STORE_FILE) {
-        store.delete(STORE_KEY);
-        store.delete(POS_KEY);
-        let _ = store.save();
+fn backup_corrupt(path: &Path, dir: &Path) {
+    let _ = fs::rename(path, dir.join("settings.corrupt.json"));
+}
+
+/// One-time upgrade: carry the widget position from the pre-0.3.0 combined settings.json
+/// into the new window.json when it has not been written yet, so the widget keeps its place
+/// instead of jumping back to the default corner after the update.
+fn migrate_widget_pos(app: &AppHandle, dir: &Path, v: &serde_json::Value) {
+    if dir.join(WINDOW_FILE).exists() {
+        return;
+    }
+    if let (Some(x), Some(y)) = (
+        v.pointer("/widget_pos/x").and_then(serde_json::Value::as_i64),
+        v.pointer("/widget_pos/y").and_then(serde_json::Value::as_i64),
+    ) {
+        save_widget_pos(app, x as i32, y as i32);
     }
 }
 
 pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Other(e.to_string()))?;
-    let value = serde_json::to_value(settings).map_err(|e| AppError::Other(e.to_string()))?;
-    store.set(STORE_KEY, value);
-    store.save().map_err(|e| AppError::Other(e.to_string()))?;
-    Ok(())
+    let dir = data_dir(app).ok_or_else(|| AppError::Other("no app data dir".to_string()))?;
+    write_json_atomic(&dir.join(SETTINGS_FILE), settings)
 }
 
-// --- widget position (persisted separately so it survives independently of settings) ---
+// --- widget position (its own file, so position churn never rewrites settings.json) ---
 
 pub fn load_widget_pos(app: &AppHandle) -> Option<(i32, i32)> {
-    let store = app.store(STORE_FILE).ok()?;
-    let v = store.get(POS_KEY)?;
+    let v: serde_json::Value = read_json_file(&data_dir(app)?.join(WINDOW_FILE))?;
     let x = v.get("x")?.as_i64()? as i32;
     let y = v.get("y")?.as_i64()? as i32;
     Some((x, y))
 }
 
 pub fn save_widget_pos(app: &AppHandle, x: i32, y: i32) {
-    if let Ok(store) = app.store(STORE_FILE) {
-        store.set(POS_KEY, serde_json::json!({ "x": x, "y": y }));
-        let _ = store.save();
+    if let Some(dir) = data_dir(app) {
+        let _ = write_json_atomic(&dir.join(WINDOW_FILE), &serde_json::json!({ "x": x, "y": y }));
     }
 }
 

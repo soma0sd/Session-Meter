@@ -1,6 +1,6 @@
 [package]
 name = "sessionmeter"
-version = "0.2.2"
+version = "0.3.0"
 description = "Claude usage tray, widget, and stats for the desktop"
 authors = ["soma0sd"]
 license = "MIT"
@@ -18,7 +18,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
-tauri-plugin-store = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 tauri-plugin-notification = "2"

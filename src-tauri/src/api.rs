@@ -41,6 +41,9 @@ pub struct UsageSnapshot {
     pub buckets: Vec<Bucket>,
     pub organization_name: String,
     pub account_email: String,
+    /// Friendly subscription/plan label (e.g. "Claude Max 20x"), derived from the org's
+    /// rate-limit tier. Empty when unknown.
+    pub subscription: String,
     pub fetched_at: String,
     pub status: String,
 }
@@ -171,8 +174,55 @@ pub fn parse_usage(raw: &Value, org_fallback: &str) -> UsageSnapshot {
         buckets,
         organization_name,
         account_email: String::new(),
+        subscription: String::new(),
         fetched_at: now_iso(),
         status: "ok".to_string(),
+    }
+}
+
+/// Derive a friendly subscription label from the organization object. claude.ai exposes
+/// `rate_limit_tier` like "default_claude_max_20x" / "default_claude_pro"; fall back to the
+/// `capabilities` array ("claude_max" / "claude_pro") when the tier is absent.
+fn subscription_label(org: &Value) -> String {
+    let tier = org
+        .get("rate_limit_tier")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let t = tier.strip_prefix("default_").unwrap_or(tier);
+    // A bare "default" (or empty) tier carries no plan info -> fall through to capabilities.
+    if !t.is_empty() && !t.eq_ignore_ascii_case("default") {
+        let mut out = String::new();
+        for part in t.split('_') {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            if part.eq_ignore_ascii_case("claude") {
+                out.push_str("Claude");
+            } else if part.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                out.push_str(part); // "20x", "5x"
+            } else {
+                let mut ch = part.chars();
+                if let Some(f) = ch.next() {
+                    out.extend(f.to_uppercase());
+                    out.push_str(ch.as_str());
+                }
+            }
+        }
+        return out;
+    }
+    let caps = org.get("capabilities").and_then(|v| v.as_array());
+    let has = |name: &str| {
+        caps.map(|a| a.iter().any(|c| c.as_str() == Some(name)))
+            .unwrap_or(false)
+    };
+    if has("claude_max") {
+        "Claude Max".to_string()
+    } else if has("claude_pro") {
+        "Claude Pro".to_string()
+    } else if has("claude_team") {
+        "Claude Team".to_string()
+    } else {
+        String::new()
     }
 }
 
@@ -254,6 +304,7 @@ pub async fn fetch_usage(
         .to_string();
     let raw = get_json(client, cookie, &format!("/organizations/{uuid}/usage")).await?;
     let mut snapshot = parse_usage(&raw, &org_name);
+    snapshot.subscription = subscription_label(org);
 
     // Prefer the account's real display name + email from /account; else fall back to the
     // org name without the "'s Organization" suffix. One fetch supplies both fields.

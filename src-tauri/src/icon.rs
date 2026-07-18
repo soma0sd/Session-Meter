@@ -201,7 +201,7 @@ mod tests {
     /// Render sample gauges (scaled 4x) + a ~16px tray emulation for visual inspection.
     #[test]
     fn dump_sample_icons() {
-        let dir = std::env::temp_dir().join("claudegauge_icons");
+        let dir = std::env::temp_dir().join("sessionmeter_icons");
         std::fs::create_dir_all(&dir).unwrap();
         let samples = [
             (92u8, true, true),

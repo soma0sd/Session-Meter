@@ -25,6 +25,7 @@ export interface UsageSnapshot {
   buckets: Bucket[];
   organization_name: string;
   account_email: string;
+  subscription: string;
   fetched_at: string;
   status: UsageStatus;
 }
@@ -37,7 +38,8 @@ export interface HistoryPoint {
 
 export interface NotifySettings {
   enabled: boolean;
-  thresholds: number[];
+  session_threshold: number;
+  weekly_threshold: number;
   on_reset: boolean;
 }
 
@@ -49,7 +51,8 @@ export interface Settings {
   always_on_top: boolean;
   move_lock: boolean;
   tray_display: "remaining" | "used";
-  tray_bucket: "five_hour" | "weekly";
+  widget_layout: "detailed" | "compact";
+  widget_visible: boolean;
   notify: NotifySettings;
   history_retention_days: number;
   org_name: string;
@@ -98,6 +101,7 @@ function mockUsage(): UsageSnapshot {
     buckets,
     organization_name: "Preview Org",
     account_email: "you@example.com",
+    subscription: "Claude Max 20x",
     fetched_at: iso(0),
     status: "ok",
   };
@@ -111,8 +115,9 @@ function mockSettings(): Settings {
     always_on_top: true,
     move_lock: false,
     tray_display: "remaining",
-    tray_bucket: "five_hour",
-    notify: { enabled: true, thresholds: [80, 95], on_reset: true },
+    widget_layout: "detailed",
+    widget_visible: true,
+    notify: { enabled: true, session_threshold: 80, weekly_threshold: 80, on_reset: true },
     history_retention_days: 30,
     org_name: "Preview Org",
     account_email: "you@example.com",

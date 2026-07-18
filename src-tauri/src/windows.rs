@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use tauri_plugin_positioner::{Position, WindowExt};
 
 use crate::config;
@@ -92,28 +92,84 @@ pub fn open_news(app: &AppHandle) {
     show_and_focus(app, "news");
 }
 
-/// Restore the widget to its saved position, or bottom-right on first use.
+/// Restore the widget to its saved position, or bottom-right on first use (or whenever the
+/// saved position is off-screen, which self-heals a stale/sentinel value left by an older
+/// build so the widget never comes back invisible).
 fn place_widget(app: &AppHandle, win: &tauri::WebviewWindow) {
-    if let Some((x, y)) = config::load_widget_pos(app) {
-        let _ = win.set_position(PhysicalPosition::new(x, y));
-    } else {
-        let _ = win.move_window(Position::BottomRight);
+    match config::load_widget_pos(app).filter(|&(x, y)| pos_on_screen(win, x, y)) {
+        Some((x, y)) => {
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+        }
+        None => {
+            let _ = win.move_window(Position::BottomRight);
+        }
     }
 }
 
-/// Persist the widget's current on-screen position.
+/// True if (x, y) lands inside a connected monitor. Rejects the Win32 minimized sentinel
+/// (-32000) and any position on a since-disconnected display.
+fn pos_on_screen(win: &tauri::WebviewWindow, x: i32, y: i32) -> bool {
+    if x <= -32000 || y <= -32000 {
+        return false;
+    }
+    let Ok(mons) = win.available_monitors() else {
+        return false;
+    };
+    mons.iter().any(|m| {
+        let p = m.position();
+        let s = m.size();
+        x >= p.x && y >= p.y && x < p.x + s.width as i32 && y < p.y + s.height as i32
+    })
+}
+
+/// Persist the widget's current on-screen position. Windows parks a minimizing/hiding window
+/// at the (-32000,-32000) sentinel while still reporting is_visible()==true, so also require
+/// the window not be minimized and reject the sentinel - otherwise that bogus position gets
+/// saved and the widget returns off-screen (invisible) on the next launch.
 pub fn save_widget_pos(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("widget") {
-        if matches!(win.is_visible(), Ok(true)) {
+        if matches!(win.is_visible(), Ok(true)) && !matches!(win.is_minimized(), Ok(true)) {
             if let Ok(pos) = win.outer_position() {
-                config::save_widget_pos(app, pos.x, pos.y);
+                if pos.x > -32000 && pos.y > -32000 {
+                    config::save_widget_pos(app, pos.x, pos.y);
+                }
             }
         }
     }
 }
 
-/// Show the widget (placing it if it is not already visible). Used on startup.
+/// Desired widget visibility from settings (defaults to shown).
+fn widget_should_show(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .map(|s| s.settings.lock().unwrap().widget_visible)
+        .unwrap_or(true)
+}
+
+/// Persist the desired widget visibility into settings (so a restart and the watchdog honor it).
+fn set_widget_visible(app: &AppHandle, visible: bool) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let snap = {
+        let mut s = state.settings.lock().unwrap();
+        if s.widget_visible == visible {
+            return;
+        }
+        s.widget_visible = visible;
+        s.clone()
+    };
+    let _ = config::save(app, &snap);
+    // Broadcast like the other widget-control commands so an open Settings window keeps a
+    // current widget_visible; otherwise its next save would round-trip a stale value and
+    // revert this show/hide (which reconcile would then re-enforce).
+    let _ = app.emit("settings://changed", &snap);
+}
+
+/// Show the widget on startup, unless the user had it hidden.
 pub fn show_widget(app: &AppHandle) {
+    if !widget_should_show(app) {
+        return;
+    }
     if let Some(win) = app.get_webview_window("widget") {
         if !matches!(win.is_visible(), Ok(true)) {
             place_widget(app, &win);
@@ -122,17 +178,40 @@ pub fn show_widget(app: &AppHandle) {
     }
 }
 
-/// Show or hide the widget, persisting/restoring its position across toggles.
+/// Show or hide the widget (user action), persisting the choice and its position.
 pub fn toggle_widget(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("widget") {
-        if matches!(win.is_visible(), Ok(true)) {
-            save_widget_pos(app);
-            let _ = win.hide();
-        } else {
+        let show = !matches!(win.is_visible(), Ok(true));
+        if show {
             place_widget(app, &win);
             let _ = win.show();
             let _ = win.set_focus();
+        } else {
+            save_widget_pos(app);
+            let _ = win.hide();
         }
+        set_widget_visible(app, show);
+    }
+}
+
+/// Keep the widget window's actual state in sync with the desired `widget_visible` setting,
+/// recovering if it drifted (hidden when it should show, or pushed off-screen). Called each
+/// poll cycle, i.e. at the user's refresh interval.
+pub fn reconcile_widget_visibility(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("widget") else {
+        return;
+    };
+    if widget_should_show(app) {
+        let on_screen = win
+            .outer_position()
+            .map(|p| pos_on_screen(&win, p.x, p.y))
+            .unwrap_or(false);
+        if !matches!(win.is_visible(), Ok(true)) || !on_screen {
+            place_widget(app, &win);
+            let _ = win.show();
+        }
+    } else if matches!(win.is_visible(), Ok(true)) {
+        let _ = win.hide();
     }
 }
 

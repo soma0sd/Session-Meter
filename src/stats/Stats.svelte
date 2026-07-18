@@ -120,14 +120,38 @@
     const l = $t("bucket." + b.key);
     return l.startsWith("bucket.") ? b.label : l;
   }
+
+  // Time axis across the top of the history chart.
+  function fmtAxis(ms: number): string {
+    const d = new Date(ms);
+    if (range === "7d") return `${d.getMonth() + 1}/${d.getDate()}`;
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  // The chart plots points evenly by INDEX (not by wall-clock time), so position each tick
+  // by index fraction and label it with the actual time at that index - otherwise labels
+  // drift off their points whenever sampling is uneven (7d range, gaps while the app was
+  // closed).
+  const axisTicks = $derived.by(() => {
+    const n = history.length;
+    if (n < 2) return [] as { frac: number; label: string }[];
+    const N = 4;
+    return Array.from({ length: N }, (_, i) => {
+      const frac = i / (N - 1);
+      const t = Date.parse(history[Math.round(frac * (n - 1))]?.at ?? "");
+      return { frac, label: Number.isNaN(t) ? "" : fmtAxis(t) };
+    });
+  });
 </script>
 
 <div class="win">
   <TitleBar title={$t("stats.title")} />
   <main>
-  {#if snap && (snap.organization_name || snap.account_email)}
+  {#if snap && (snap.organization_name || snap.account_email || snap.subscription)}
     <div class="org">
       <span class="org-name">{snap.organization_name || "Claude"}</span>
+      {#if snap.subscription}
+        <span class="org-sub">{snap.subscription}</span>
+      {/if}
       {#if snap.account_email}
         <span class="org-email">{snap.account_email}</span>
       {/if}
@@ -165,6 +189,19 @@
         </div>
       </div>
       {#if hasHistory}
+        {#if axisTicks.length}
+          <div class="axis">
+            {#each axisTicks as tk (tk.frac)}
+              <span
+                class="tick"
+                style="left:{tk.frac * 100}%; transform:translateX({tk.frac === 0
+                  ? '0'
+                  : tk.frac === 1
+                    ? '-100%'
+                    : '-50%'})">{tk.label}</span>
+            {/each}
+          </div>
+        {/if}
         <svg class="chart" viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" role="img" aria-label={$t("stats.history")}>
           {#each [25, 50, 75] as g (g)}
             <line x1="0" x2={CW} y1={mapY(g, CH, 3)} y2={mapY(g, CH, 3)} class="grid" />
@@ -244,6 +281,27 @@
   .org-email {
     font-size: 0.78rem;
     color: rgb(var(--fg-muted));
+  }
+  .org-sub {
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: rgb(var(--accent) / 0.16);
+    color: rgb(var(--accent));
+  }
+  .axis {
+    position: relative;
+    height: 13px;
+    margin-top: 6px;
+    font-size: 0.64rem;
+    color: rgb(var(--fg-muted));
+    font-variant-numeric: tabular-nums;
+  }
+  .tick {
+    position: absolute;
+    top: 0;
+    white-space: nowrap;
   }
   .cards {
     display: grid;

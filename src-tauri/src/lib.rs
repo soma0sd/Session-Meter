@@ -31,7 +31,6 @@ pub fn run() {
                 let _ = win.set_focus();
             }
         }))
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_positioner::init())
@@ -42,9 +41,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
-            // Debug builds start from default settings each run for clean testing.
-            #[cfg(debug_assertions)]
-            config::clear_settings(&handle);
             let settings = config::load(&handle);
             app.manage(AppState::new(settings));
             tray::build_tray(&handle)?;
@@ -85,7 +81,15 @@ pub fn run() {
             // Persist the widget position as the user drags it, so a reboot restores the
             // last placement instead of the default corner.
             WindowEvent::Moved(pos) if window.label() == "widget" => {
-                if matches!(window.is_visible(), Ok(true)) {
+                // Windows parks a minimizing/hiding window at (-32000,-32000) and still
+                // reports is_visible()==true, so also reject the sentinel and the minimized
+                // state before persisting; otherwise a hide/minimize (e.g. during an update
+                // restart) saves that bogus position and the widget returns off-screen.
+                if pos.x > -32000
+                    && pos.y > -32000
+                    && matches!(window.is_visible(), Ok(true))
+                    && !matches!(window.is_minimized(), Ok(true))
+                {
                     config::save_widget_pos(window.app_handle(), pos.x, pos.y);
                 }
             }
