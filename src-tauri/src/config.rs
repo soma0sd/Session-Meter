@@ -88,13 +88,10 @@ impl Default for Settings {
 }
 
 fn data_dir(app: &AppHandle) -> Option<PathBuf> {
-    let base = app.path().app_data_dir().ok()?;
-    // Debug builds keep their settings/window state in a subfolder so running `tauri dev`
-    // never clears or overwrites the installed release app's data in the same dir. (The
-    // session cookie is intentionally left shared so a dev run stays signed in.)
-    #[cfg(debug_assertions)]
-    let base = base.join("dev");
-    Some(base)
+    // Settings/window state live in the app data dir alongside the session and history.
+    // Debug and release builds share it (there is no longer a per-run reset), so a dev run
+    // sees and keeps the same settings as the installed app instead of appearing to reset.
+    app.path().app_data_dir().ok()
 }
 
 /// Atomically write JSON to `path`: serialize to a sibling temp file, then rename over the
