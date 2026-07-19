@@ -27,6 +27,8 @@ All notable changes to this project are documented here. The format is based on
 - **Start Menu shortcut now shows the app icon after install**: the installer refreshes the
   shell icon cache so the custom icon appears right away (including any stale cache left by
   the earlier product name).
+- History chart now plots by real time and adds a **30-day view** (24h / 7d / 30d render at
+  their true scale). Fixed the "NaN" remaining time in the reset schedule.
 
 ### Changed
 

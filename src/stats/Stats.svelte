@@ -14,7 +14,7 @@
     type Bucket,
   } from "../lib/ipc";
   import { formatCountdown, formatResetDateTime } from "../lib/countdown";
-  import { linePath, areaPath, mapY } from "../lib/charts";
+  import { linePathT, areaPathT, mapY } from "../lib/charts";
   import { forecast, type Forecast } from "../lib/forecast";
 
   const CW = 620;
@@ -22,7 +22,7 @@
 
   let snap = $state<UsageSnapshot | null>(null);
   let history = $state<HistoryPoint[]>([]);
-  let range = $state<"24h" | "7d">("24h");
+  let range = $state<"24h" | "7d" | "30d">("24h");
   let now = $state(Date.now());
 
   let timer: number | undefined;
@@ -72,7 +72,7 @@
     unlisteners.forEach((u) => u());
   });
 
-  async function setRange(r: "24h" | "7d") {
+  async function setRange(r: "24h" | "7d" | "30d") {
     range = r;
     await loadHistory();
   }
@@ -91,7 +91,17 @@
 
   const fiveVals = $derived(seriesValues("five_hour"));
   const weekVals = $derived(seriesValues("weekly"));
+  const fiveTimes = $derived(seriesTimes("five_hour"));
+  const weekTimes = $derived(seriesTimes("weekly"));
   const hasHistory = $derived(fiveVals.length >= 2 || weekVals.length >= 2);
+
+  // Chart time window: points are placed by real timestamp within [winStart, now], so each
+  // range renders at its true scale (24h vs 7d vs 30d look different even with the same data).
+  const rangeMs = $derived(
+    range === "24h" ? 24 * 3_600_000 : range === "7d" ? 7 * 86_400_000 : 30 * 86_400_000,
+  );
+  const winEnd = $derived(now);
+  const winStart = $derived(winEnd - rangeMs);
 
   function fc(key: "five_hour" | "weekly", bucket: { remaining: number; resets_at: string } | null): Forecast {
     if (!bucket) return { depleting: false, minutesToEmpty: null, beforeReset: false };
@@ -121,24 +131,20 @@
     return l.startsWith("bucket.") ? b.label : l;
   }
 
-  // Time axis across the top of the history chart.
+  // Time axis across the top of the history chart. 24h shows clock time; wider ranges show
+  // the date. Ticks are evenly spaced across the [winStart, winEnd] window that the chart
+  // itself uses, so labels line up with the time-positioned points.
   function fmtAxis(ms: number): string {
     const d = new Date(ms);
-    if (range === "7d") return `${d.getMonth() + 1}/${d.getDate()}`;
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+    if (range === "24h") return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return `${d.getMonth() + 1}/${d.getDate()}`;
   }
-  // The chart plots points evenly by INDEX (not by wall-clock time), so position each tick
-  // by index fraction and label it with the actual time at that index - otherwise labels
-  // drift off their points whenever sampling is uneven (7d range, gaps while the app was
-  // closed).
   const axisTicks = $derived.by(() => {
-    const n = history.length;
-    if (n < 2) return [] as { frac: number; label: string }[];
+    if (!hasHistory || !(winEnd > winStart)) return [] as { frac: number; label: string }[];
     const N = 4;
     return Array.from({ length: N }, (_, i) => {
       const frac = i / (N - 1);
-      const t = Date.parse(history[Math.round(frac * (n - 1))]?.at ?? "");
-      return { frac, label: Number.isNaN(t) ? "" : fmtAxis(t) };
+      return { frac, label: fmtAxis(winStart + frac * (winEnd - winStart)) };
     });
   });
 </script>
@@ -186,6 +192,7 @@
         <div class="range">
           <button class:active={range === "24h"} onclick={() => setRange("24h")}>24h</button>
           <button class:active={range === "7d"} onclick={() => setRange("7d")}>7d</button>
+          <button class:active={range === "30d"} onclick={() => setRange("30d")}>30d</button>
         </div>
       </div>
       {#if hasHistory}
@@ -207,12 +214,12 @@
             <line x1="0" x2={CW} y1={mapY(g, CH, 3)} y2={mapY(g, CH, 3)} class="grid" />
           {/each}
           {#if weekVals.length >= 2}
-            <path d={areaPath(weekVals, CW, CH)} class="area week" />
-            <path d={linePath(weekVals, CW, CH)} class="line week" />
+            <path d={areaPathT(weekTimes, weekVals, winStart, winEnd, CW, CH)} class="area week" />
+            <path d={linePathT(weekTimes, weekVals, winStart, winEnd, CW, CH)} class="line week" />
           {/if}
           {#if fiveVals.length >= 2}
-            <path d={areaPath(fiveVals, CW, CH)} class="area five" />
-            <path d={linePath(fiveVals, CW, CH)} class="line five" />
+            <path d={areaPathT(fiveTimes, fiveVals, winStart, winEnd, CW, CH)} class="area five" />
+            <path d={linePathT(fiveTimes, fiveVals, winStart, winEnd, CW, CH)} class="line five" />
           {/if}
         </svg>
         <div class="legend">

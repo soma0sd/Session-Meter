@@ -19,6 +19,7 @@ export const changelog: ChangelogEntry[] = [
       "위젯 표시 감시로 화면 밖으로 사라진 위젯 자동 복구.",
       "업데이트 시 설정·세션이 초기화되던 문제 수정(원자적 저장, 위치 파일 분리, 손상 파일 복구).",
       "설치 후 바로가기 아이콘이 표시되도록 수정(셸 아이콘 캐시 갱신), 위젯 화면 밖 남던 문제 수정.",
+      "통계 이력 그래프 시간 기준 표시 + 1개월 보기 추가, 남은 시간 NaN 표기 수정.",
       "설정 섹션 카드 구분, 미사용 트레이 창 옵션 제거.",
     ],
     en: [
@@ -28,6 +29,7 @@ export const changelog: ChangelogEntry[] = [
       "Widget visibility watchdog recovers a widget that drifted off-screen.",
       "Fixed settings/session resetting on update (atomic writes, separate position file, corrupt-file recovery).",
       "Fixed the shortcut icon after install (shell icon-cache refresh) and the off-screen widget.",
+      "History chart plots by real time with a 30-day view; fixed the NaN remaining time.",
       "Settings grouped into cards; removed the unused tray-window option.",
     ],
   },

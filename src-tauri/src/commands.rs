@@ -47,6 +47,7 @@ pub fn get_history(
     let cutoff = match range.as_str() {
         "24h" => Some(OffsetDateTime::now_utc() - Duration::hours(24)),
         "7d" => Some(OffsetDateTime::now_utc() - Duration::days(7)),
+        "30d" => Some(OffsetDateTime::now_utc() - Duration::days(30)),
         _ => None,
     };
     if let Some(c) = cutoff {

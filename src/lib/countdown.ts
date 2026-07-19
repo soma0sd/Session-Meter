@@ -6,7 +6,10 @@ export function msUntil(isoResetsAt: string): number {
 }
 
 export function formatCountdown(ms: number, locale: "ko" | "en" = "en"): string {
-  const totalSec = Math.floor(ms / 1000);
+  // Guard against a missing/invalid reset time (e.g. a fresh session with no resets_at yet),
+  // which would otherwise render as "NaN...".
+  if (!Number.isFinite(ms)) return "-";
+  const totalSec = Math.floor(Math.max(0, ms) / 1000);
   const d = Math.floor(totalSec / 86400);
   const h = Math.floor((totalSec % 86400) / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
