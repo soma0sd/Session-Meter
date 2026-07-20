@@ -6,11 +6,9 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::api;
-use crate::config;
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::{tray, usage};
+use crate::{service, tray, usage};
 
 const CHECK_STEP_SECS: u64 = 5;
 
@@ -23,38 +21,42 @@ fn interval_secs(app: &AppHandle) -> u64 {
 }
 
 async fn poll_once(app: &AppHandle) {
-    let Some(cookie) = config::load_cookie(app) else {
+    let services = service::logged_in(app);
+    if services.is_empty() {
         tray::update_tray(app);
         return;
-    };
+    }
     let Some(client) = app.try_state::<AppState>().map(|s| s.client.clone()) else {
         return;
     };
-    match api::fetch_usage(&client, &cookie).await {
-        Ok(snapshot) => {
-            eprintln!(
-                "[cg] poll ok: org='{}' buckets={} five_hour={:?}",
-                snapshot.organization_name,
-                snapshot.buckets.len(),
-                snapshot.five_hour.as_ref().map(|w| w.remaining)
-            );
-            usage::apply_snapshot(app, snapshot);
-        }
-        Err(AppError::Unauthorized) => {
-            eprintln!("[cg] poll: unauthorized (session expired)");
-            if let Some(state) = app.try_state::<AppState>() {
-                if let Some(s) = state.last_snapshot.lock().unwrap().as_mut() {
-                    s.status = "unauthorized".to_string();
-                }
+    for svc in services {
+        match service::fetch(app, &svc, &client).await {
+            Ok(snapshot) => {
+                eprintln!(
+                    "[cg] poll ok: service='{}' org='{}' buckets={} primary={:?}",
+                    svc,
+                    snapshot.organization_name,
+                    snapshot.buckets.len(),
+                    snapshot.five_hour.as_ref().map(|w| w.remaining)
+                );
+                usage::apply_snapshot(app, snapshot);
             }
-            let _ = app.emit(
-                "session://changed",
-                serde_json::json!({ "logged_in": false, "org_name": "" }),
-            );
-            tray::update_tray(app);
-        }
-        Err(e) => {
-            eprintln!("[cg] poll error: {e}");
+            Err(AppError::Unauthorized) => {
+                eprintln!("[cg] poll: unauthorized ({svc}, session expired)");
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Some(s) = state.last_snapshot.lock().unwrap().get_mut(&svc) {
+                        s.status = "unauthorized".to_string();
+                    }
+                }
+                let _ = app.emit(
+                    "session://changed",
+                    serde_json::json!({ "service": svc, "logged_in": false, "org_name": "" }),
+                );
+                tray::update_tray(app);
+            }
+            Err(e) => {
+                eprintln!("[cg] poll error ({svc}): {e}");
+            }
         }
     }
 }

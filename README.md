@@ -19,6 +19,14 @@
 > **본인 책임**으로 사용하십시오. 본 프로젝트는 Anthropic과 무관하며, "Claude"는 Anthropic, PBC의
 > 상표입니다. SessionMeter는 해당 상표를 제품명으로 사용하지 않으며, 호환 대상을 설명하기 위해서만
 > "Claude"를 언급합니다.
+>
+> **Antigravity(Gemini 구독)는 훨씬 더 비공식적·실험적입니다.** 공식 API가 없어, 별도 프로세스로 띄운
+> 내장 로그인 창에서 본인 Google 계정으로 로그인한 뒤 gemini.google.com/usage 페이지의 사용량 표시를
+> 그대로 읽어옵니다(화면 스크래핑). Google은 임베드 브라우저의 로그인을 정책적으로 차단하므로, 이 창은
+> 일반 브라우저처럼 보이도록 위장한 상태로 동작합니다 — Google이 이를 다시 차단하면 로그인이 실패할 수
+> 있으며, 페이지 구조가 바뀌면 수치가 잘못 표시되거나 조회가 실패할 수 있습니다. 반드시
+> [Google 서비스 약관](https://policies.google.com/terms)을 확인하고 **본인 책임**으로 사용하십시오.
+> "Antigravity"·"Gemini"는 Google LLC의 상표이며 본 프로젝트는 Google과 무관합니다.
 
 ## 기능
 

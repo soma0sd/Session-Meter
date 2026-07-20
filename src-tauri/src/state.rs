@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
 
@@ -11,7 +12,8 @@ use crate::notify::NotifyState;
 pub struct AppState {
     pub client: reqwest::Client,
     pub settings: Mutex<Settings>,
-    pub last_snapshot: Mutex<Option<UsageSnapshot>>,
+    /// Latest usage snapshot per service id (keyed by `UsageSnapshot::service_id`).
+    pub last_snapshot: Mutex<HashMap<String, UsageSnapshot>>,
     pub tray: Mutex<Option<TrayIcon>>,
     /// Generation counter to disambiguate a single click from a double click.
     pub click_gen: AtomicU64,
@@ -31,7 +33,7 @@ impl AppState {
         Self {
             client: crate::api::build_client(),
             settings: Mutex::new(settings),
-            last_snapshot: Mutex::new(None),
+            last_snapshot: Mutex::new(HashMap::new()),
             tray: Mutex::new(None),
             click_gen: AtomicU64::new(0),
             last_double_ms: AtomicU64::new(0),

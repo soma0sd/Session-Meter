@@ -18,32 +18,47 @@ pub struct SessionStatus {
     pub email: String,
 }
 
+/// Per-service login status + identity, for the settings account list and the stats/style
+/// windows (which show only logged-in services).
+#[derive(Serialize)]
+pub struct ServiceStatus {
+    pub id: String,
+    pub name: String,
+    pub logged_in: bool,
+    pub org_name: String,
+    pub email: String,
+}
+
 #[tauri::command]
-pub fn get_usage(state: State<'_, AppState>) -> Option<UsageSnapshot> {
-    state.last_snapshot.lock().unwrap().clone()
+pub fn get_usage(state: State<'_, AppState>, service: Option<String>) -> Option<UsageSnapshot> {
+    let service = crate::service::normalize(service.as_deref());
+    state.last_snapshot.lock().unwrap().get(&service).cloned()
 }
 
 #[tauri::command]
 pub async fn refresh_now(
     app: AppHandle,
     state: State<'_, AppState>,
+    service: Option<String>,
 ) -> Result<UsageSnapshot, String> {
-    let cookie = config::load_cookie(&app).ok_or_else(|| "not signed in".to_string())?;
-    let snapshot = api::fetch_usage(&state.client, &cookie)
+    let service = crate::service::normalize(service.as_deref());
+    let snapshot = crate::service::fetch(&app, &service, &state.client)
         .await
         .map_err(|e| e.to_string())?;
     crate::usage::apply_snapshot(&app, snapshot.clone());
     Ok(snapshot)
 }
 
-/// Usage history within the retention window, optionally narrowed to "24h" or "7d".
+/// Usage history within the retention window, optionally narrowed to "24h"/"7d"/"30d".
 #[tauri::command]
 pub fn get_history(
     app: AppHandle,
     range: String,
+    service: Option<String>,
 ) -> Vec<crate::history::HistoryPoint> {
     use time::{Duration, OffsetDateTime};
-    let mut points = crate::history::load(&app);
+    let service = crate::service::normalize(service.as_deref());
+    let mut points = crate::history::load(&app, &service);
     let cutoff = match range.as_str() {
         "24h" => Some(OffsetDateTime::now_utc() - Duration::hours(24)),
         "7d" => Some(OffsetDateTime::now_utc() - Duration::days(7)),
@@ -72,9 +87,10 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
     let prev = state.settings.lock().unwrap().clone();
 
-    if settings.always_on_top != prev.always_on_top {
-        if let Some(win) = app.get_webview_window("widget") {
-            let _ = win.set_always_on_top(settings.always_on_top);
+    // Re-assert each service widget's always-on-top from its (possibly changed) config.
+    for (svc, wc) in &settings.widgets {
+        if let Some(win) = app.get_webview_window(&crate::windows::widget_label(svc)) {
+            let _ = win.set_always_on_top(wc.always_on_top);
         }
     }
 
@@ -153,11 +169,19 @@ pub async fn get_changelog(state: State<'_, AppState>, locale: String) -> Result
 }
 
 #[tauri::command]
-pub fn get_session_status(app: AppHandle, state: State<'_, AppState>) -> SessionStatus {
-    let logged_in = config::load_cookie(&app).is_some();
-    let (org_name, email) = {
+pub fn get_session_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    service: Option<String>,
+) -> SessionStatus {
+    let service = crate::service::normalize(service.as_deref());
+    let logged_in = crate::service::has_session(&app, &service);
+    // Only Claude's identity is persisted in settings today; other services carry their own.
+    let (org_name, email) = if service == crate::service::CLAUDE {
         let s = state.settings.lock().unwrap();
         (s.org_name.clone(), s.account_email.clone())
+    } else {
+        (String::new(), String::new())
     };
     SessionStatus {
         logged_in,
@@ -166,10 +190,44 @@ pub fn get_session_status(app: AppHandle, state: State<'_, AppState>) -> Session
     }
 }
 
-/// Open the claude.ai login window (remote URL, IPC-isolated). Window creation is
-/// dispatched to the main thread (required on Windows).
+/// Login status + identity for every known service (logged-in or not).
 #[tauri::command]
-pub fn open_login_window(app: AppHandle) -> Result<(), String> {
+pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<ServiceStatus> {
+    crate::service::all()
+        .iter()
+        .map(|&id| {
+            let logged_in = crate::service::has_session(&app, id);
+            let (org_name, email) = if id == crate::service::CLAUDE {
+                let s = state.settings.lock().unwrap();
+                (s.org_name.clone(), s.account_email.clone())
+            } else if id == crate::service::ANTIGRAVITY {
+                let email = crate::antigravity::account_email(&app);
+                (email.clone(), email)
+            } else {
+                (String::new(), String::new())
+            };
+            ServiceStatus {
+                id: id.to_string(),
+                name: crate::service::display_name(id).to_string(),
+                logged_in,
+                org_name,
+                email,
+            }
+        })
+        .collect()
+}
+
+/// Open the login window for a service (Claude only for now: a remote, IPC-isolated
+/// claude.ai webview). Window creation is dispatched to the main thread (required on Windows).
+#[tauri::command]
+pub fn open_login_window(app: AppHandle, service: Option<String>) -> Result<(), String> {
+    let service = crate::service::normalize(service.as_deref());
+    // Antigravity uses a system-browser OAuth loopback (Google blocks embedded webviews).
+    if service == crate::service::ANTIGRAVITY {
+        crate::antigravity::start_login(&app);
+        return Ok(());
+    }
+    // Claude: embedded claude.ai login webview.
     if let Some(win) = app.get_webview_window("login") {
         let _ = win.set_focus();
         return Ok(());
@@ -183,12 +241,14 @@ pub fn open_login_window(app: AppHandle) -> Result<(), String> {
 pub async fn capture_session(
     app: AppHandle,
     state: State<'_, AppState>,
+    service: Option<String>,
 ) -> Result<SessionStatus, String> {
+    let service = crate::service::normalize(service.as_deref());
     let cookie = auth::capture_cookie(&app).await.map_err(|e| e.to_string())?;
     let snapshot = api::fetch_usage(&state.client, &cookie)
         .await
         .map_err(|e| e.to_string())?;
-    config::save_cookie(&app, &cookie).map_err(|e| e.to_string())?;
+    config::save_cookie(&app, &service, &cookie).map_err(|e| e.to_string())?;
     eprintln!(
         "[cg] captured session: org='{}' buckets={}",
         snapshot.organization_name,
@@ -216,9 +276,14 @@ pub async fn capture_session(
 }
 
 #[tauri::command]
-pub fn clear_session(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    config::clear_cookie(&app).map_err(|e| e.to_string())?;
-    *state.last_snapshot.lock().unwrap() = None;
+pub fn clear_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    service: Option<String>,
+) -> Result<(), String> {
+    let service = crate::service::normalize(service.as_deref());
+    config::clear_cookie(&app, &service).map_err(|e| e.to_string())?;
+    state.last_snapshot.lock().unwrap().remove(&service);
     Ok(())
 }
 
@@ -235,39 +300,60 @@ pub fn open_stats_window(app: AppHandle) {
 }
 
 #[tauri::command]
+pub fn open_style_window(app: AppHandle) {
+    windows::open_style(&app);
+}
+
+#[tauri::command]
 pub fn toggle_widget(app: AppHandle) {
     windows::toggle_widget(&app);
 }
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
-    windows::save_widget_pos(&app);
+    windows::persist_widgets_before_exit(&app);
     app.exit(0);
 }
 
 // --- widget control ---
 
 #[tauri::command]
-pub fn set_always_on_top(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window("widget") {
+pub fn set_always_on_top(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    service: Option<String>,
+    on: bool,
+) -> Result<(), String> {
+    let service = crate::service::normalize(service.as_deref());
+    if let Some(win) = app.get_webview_window(&crate::windows::widget_label(&service)) {
         win.set_always_on_top(on).map_err(|e| e.to_string())?;
     }
     let updated = {
         let mut settings = state.settings.lock().unwrap();
-        settings.always_on_top = on;
+        let mut wc = settings.widget(&service);
+        wc.always_on_top = on;
+        settings.widgets.insert(service.clone(), wc);
         config::save(&app, &settings).map_err(|e| e.to_string())?;
         settings.clone()
     };
-    // Keep an open Settings window's checkbox in sync when toggled from the widget.
+    // Keep an open Settings/Style window in sync when toggled from the widget.
     let _ = app.emit("settings://changed", &updated);
     Ok(())
 }
 
 #[tauri::command]
-pub fn set_move_lock(app: AppHandle, state: State<'_, AppState>, locked: bool) -> Result<(), String> {
+pub fn set_move_lock(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    service: Option<String>,
+    locked: bool,
+) -> Result<(), String> {
+    let service = crate::service::normalize(service.as_deref());
     let updated = {
         let mut settings = state.settings.lock().unwrap();
-        settings.move_lock = locked;
+        let mut wc = settings.widget(&service);
+        wc.move_lock = locked;
+        settings.widgets.insert(service.clone(), wc);
         config::save(&app, &settings).map_err(|e| e.to_string())?;
         settings.clone()
     };
@@ -276,11 +362,19 @@ pub fn set_move_lock(app: AppHandle, state: State<'_, AppState>, locked: bool) -
 }
 
 #[tauri::command]
-pub fn set_widget_opacity(app: AppHandle, state: State<'_, AppState>, alpha: f64) -> Result<(), String> {
+pub fn set_widget_opacity(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    service: Option<String>,
+    alpha: f64,
+) -> Result<(), String> {
+    let service = crate::service::normalize(service.as_deref());
     let clamped = alpha.clamp(0.2, 1.0);
     let updated = {
         let mut settings = state.settings.lock().unwrap();
-        settings.widget_opacity = clamped;
+        let mut wc = settings.widget(&service);
+        wc.opacity = clamped;
+        settings.widgets.insert(service.clone(), wc);
         config::save(&app, &settings).map_err(|e| e.to_string())?;
         settings.clone()
     };

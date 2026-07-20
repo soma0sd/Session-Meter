@@ -88,15 +88,78 @@ pub fn open_stats(app: &AppHandle) {
     show_and_focus(app, "stats");
 }
 
+pub fn open_style(app: &AppHandle) {
+    show_and_focus(app, "style");
+}
+
 pub fn open_news(app: &AppHandle) {
     show_and_focus(app, "news");
 }
 
-/// Restore the widget to its saved position, or bottom-right on first use (or whenever the
-/// saved position is off-screen, which self-heals a stale/sentinel value left by an older
-/// build so the widget never comes back invisible).
-fn place_widget(app: &AppHandle, win: &tauri::WebviewWindow) {
-    match config::load_widget_pos(app).filter(|&(x, y)| pos_on_screen(win, x, y)) {
+/// The OS window label for a service's widget. Claude reuses the static `widget` window
+/// declared in tauri.conf.json (so existing behavior is unchanged); other services get a
+/// runtime `widget-{service}` window.
+pub fn widget_label(service: &str) -> String {
+    if service == "claude" {
+        "widget".to_string()
+    } else {
+        format!("widget-{service}")
+    }
+}
+
+/// Reverse of `widget_label`: the service id a widget window label belongs to.
+pub fn service_from_widget_label(label: &str) -> Option<String> {
+    if label == "widget" {
+        Some("claude".to_string())
+    } else {
+        label.strip_prefix("widget-").map(|s| s.to_string())
+    }
+}
+
+/// Services that should have a widget window: Claude always (shown even before sign-in), plus
+/// any other logged-in service.
+fn widget_services(app: &AppHandle) -> Vec<String> {
+    let mut v = vec!["claude".to_string()];
+    for s in crate::service::logged_in(app) {
+        if s != "claude" && !v.contains(&s) {
+            v.push(s);
+        }
+    }
+    v
+}
+
+/// Create a runtime widget window for a non-Claude service (Claude uses the static one).
+pub fn create_widget_window(app: &AppHandle, service: &str) {
+    let label = widget_label(service);
+    if app.get_webview_window(&label).is_some() {
+        return;
+    }
+    let aot = app
+        .try_state::<AppState>()
+        .map(|s| s.settings.lock().unwrap().widget(service).always_on_top)
+        .unwrap_or(true);
+    match tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("widget.html".into()))
+        .title("SessionMeter Widget")
+        .inner_size(252.0, 150.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(aot)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .visible(false)
+        .build()
+    {
+        Ok(_) => eprintln!("[cg] widget window created ({service})"),
+        Err(e) => eprintln!("[cg] widget window build error ({service}): {e}"),
+    }
+}
+
+/// Restore a service's widget to its saved position, or bottom-right on first use (or whenever
+/// the saved position is off-screen, self-healing a stale/sentinel value so the widget never
+/// comes back invisible).
+fn place_widget(app: &AppHandle, win: &tauri::WebviewWindow, service: &str) {
+    match config::load_widget_pos(app, service).filter(|&(x, y)| pos_on_screen(win, x, y)) {
         Some((x, y)) => {
             let _ = win.set_position(PhysicalPosition::new(x, y));
         }
@@ -122,96 +185,128 @@ fn pos_on_screen(win: &tauri::WebviewWindow, x: i32, y: i32) -> bool {
     })
 }
 
-/// Persist the widget's current on-screen position. Windows parks a minimizing/hiding window
-/// at the (-32000,-32000) sentinel while still reporting is_visible()==true, so also require
-/// the window not be minimized and reject the sentinel - otherwise that bogus position gets
-/// saved and the widget returns off-screen (invisible) on the next launch.
-pub fn save_widget_pos(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("widget") {
+/// Persist a service widget's current on-screen position. Windows parks a minimizing/hiding
+/// window at the (-32000,-32000) sentinel while still reporting is_visible()==true, so also
+/// require the window not be minimized and reject the sentinel - otherwise that bogus position
+/// gets saved and the widget returns off-screen (invisible) on the next launch.
+pub fn save_widget_pos(app: &AppHandle, service: &str) {
+    if let Some(win) = app.get_webview_window(&widget_label(service)) {
         if matches!(win.is_visible(), Ok(true)) && !matches!(win.is_minimized(), Ok(true)) {
             if let Ok(pos) = win.outer_position() {
                 if pos.x > -32000 && pos.y > -32000 {
-                    config::save_widget_pos(app, pos.x, pos.y);
+                    config::save_widget_pos(app, service, pos.x, pos.y);
                 }
             }
         }
     }
 }
 
-/// Desired widget visibility from settings (defaults to shown).
-fn widget_should_show(app: &AppHandle) -> bool {
+/// Flush every service widget's position to disk before the process exits or restarts. Called
+/// by both `quit_app` and the updater's install-then-restart path so an update never drops a
+/// widget's on-screen position: the updater hides the window during teardown, which would
+/// otherwise leave the last position unsaved and bring the widget back at its default corner.
+pub fn persist_widgets_before_exit(app: &AppHandle) {
+    for svc in widget_services(app) {
+        save_widget_pos(app, &svc);
+    }
+}
+
+/// Desired visibility of a service's widget (defaults to shown).
+fn widget_should_show(app: &AppHandle, service: &str) -> bool {
     app.try_state::<AppState>()
-        .map(|s| s.settings.lock().unwrap().widget_visible)
+        .map(|s| s.settings.lock().unwrap().widget(service).visible)
         .unwrap_or(true)
 }
 
-/// Persist the desired widget visibility into settings (so a restart and the watchdog honor it).
-fn set_widget_visible(app: &AppHandle, visible: bool) {
+/// Persist a service widget's desired visibility (so a restart and the watchdog honor it).
+fn set_widget_visible(app: &AppHandle, service: &str, visible: bool) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
     let snap = {
         let mut s = state.settings.lock().unwrap();
-        if s.widget_visible == visible {
+        let mut wc = s.widget(service);
+        if wc.visible == visible {
             return;
         }
-        s.widget_visible = visible;
+        wc.visible = visible;
+        s.widgets.insert(service.to_string(), wc);
         s.clone()
     };
     let _ = config::save(app, &snap);
-    // Broadcast like the other widget-control commands so an open Settings window keeps a
-    // current widget_visible; otherwise its next save would round-trip a stale value and
-    // revert this show/hide (which reconcile would then re-enforce).
+    // Broadcast like the other widget-control commands so an open Settings/Style window keeps a
+    // current value; otherwise its next save would round-trip a stale value and revert this
+    // show/hide (which reconcile would then re-enforce).
     let _ = app.emit("settings://changed", &snap);
 }
 
-/// Show the widget on startup, unless the user had it hidden.
+/// Show each service's widget on startup, unless the user had it hidden.
 pub fn show_widget(app: &AppHandle) {
-    if !widget_should_show(app) {
-        return;
-    }
-    if let Some(win) = app.get_webview_window("widget") {
-        if !matches!(win.is_visible(), Ok(true)) {
-            place_widget(app, &win);
+    for svc in widget_services(app) {
+        if svc != "claude" {
+            create_widget_window(app, &svc);
         }
-        let _ = win.show();
+        if !widget_should_show(app, &svc) {
+            continue;
+        }
+        if let Some(win) = app.get_webview_window(&widget_label(&svc)) {
+            if !matches!(win.is_visible(), Ok(true)) {
+                place_widget(app, &win, &svc);
+            }
+            let _ = win.show();
+        }
     }
 }
 
-/// Show or hide the widget (user action), persisting the choice and its position.
+/// Show or hide all service widgets together (tray left-click): show all if any is hidden,
+/// otherwise hide all. Persists each widget's choice and position.
 pub fn toggle_widget(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("widget") {
-        let show = !matches!(win.is_visible(), Ok(true));
-        if show {
-            place_widget(app, &win);
-            let _ = win.show();
-            let _ = win.set_focus();
-        } else {
-            save_widget_pos(app);
+    let services = widget_services(app);
+    let any_hidden = services.iter().any(|svc| {
+        app.get_webview_window(&widget_label(svc))
+            .map(|w| !matches!(w.is_visible(), Ok(true)))
+            .unwrap_or(true)
+    });
+    for svc in &services {
+        if svc != "claude" {
+            create_widget_window(app, svc);
+        }
+        if let Some(win) = app.get_webview_window(&widget_label(svc)) {
+            if any_hidden {
+                place_widget(app, &win, svc);
+                let _ = win.show();
+                let _ = win.set_focus();
+            } else {
+                save_widget_pos(app, svc);
+                let _ = win.hide();
+            }
+            set_widget_visible(app, svc, any_hidden);
+        }
+    }
+}
+
+/// Keep each service widget's actual state in sync with its desired visibility, recovering if
+/// it drifted (hidden when it should show, or pushed off-screen). Called each poll cycle.
+pub fn reconcile_widget_visibility(app: &AppHandle) {
+    for svc in widget_services(app) {
+        if svc != "claude" {
+            create_widget_window(app, &svc);
+        }
+        let Some(win) = app.get_webview_window(&widget_label(&svc)) else {
+            continue;
+        };
+        if widget_should_show(app, &svc) {
+            let on_screen = win
+                .outer_position()
+                .map(|p| pos_on_screen(&win, p.x, p.y))
+                .unwrap_or(false);
+            if !matches!(win.is_visible(), Ok(true)) || !on_screen {
+                place_widget(app, &win, &svc);
+                let _ = win.show();
+            }
+        } else if matches!(win.is_visible(), Ok(true)) {
             let _ = win.hide();
         }
-        set_widget_visible(app, show);
-    }
-}
-
-/// Keep the widget window's actual state in sync with the desired `widget_visible` setting,
-/// recovering if it drifted (hidden when it should show, or pushed off-screen). Called each
-/// poll cycle, i.e. at the user's refresh interval.
-pub fn reconcile_widget_visibility(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("widget") else {
-        return;
-    };
-    if widget_should_show(app) {
-        let on_screen = win
-            .outer_position()
-            .map(|p| pos_on_screen(&win, p.x, p.y))
-            .unwrap_or(false);
-        if !matches!(win.is_visible(), Ok(true)) || !on_screen {
-            place_widget(app, &win);
-            let _ = win.show();
-        }
-    } else if matches!(win.is_visible(), Ok(true)) {
-        let _ = win.hide();
     }
 }
 
@@ -222,7 +317,7 @@ pub fn show_menu_at(app: &AppHandle, x: f64, y: f64) {
     if let Some(win) = app.get_webview_window("menu") {
         let size = win
             .outer_size()
-            .unwrap_or(PhysicalSize::new(196, 168));
+            .unwrap_or(PhysicalSize::new(196, 300));
         let w = size.width as i32;
         let h = size.height as i32;
         let mut tx = x as i32 - w;

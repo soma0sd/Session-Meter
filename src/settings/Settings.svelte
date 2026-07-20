@@ -10,29 +10,25 @@
     getSettings,
     setSettings,
     getEffectiveLocale,
-    getSessionStatus,
+    getServicesStatus,
     openLoginWindow,
     clearSession,
+    openStyleWindow,
     setAutostart,
     getAutostart,
     checkForUpdate,
     installUpdate,
     openNewsWindow,
     type Settings,
-    type SessionStatus,
+    type ServiceStatus,
     type UpdateInfo,
   } from "../lib/ipc";
 
   const DEFAULTS: Settings = {
     theme: "system",
     language: "auto",
-    widget_opacity: 0.9,
     refresh_interval_min: 5,
-    always_on_top: true,
-    move_lock: false,
-    tray_display: "remaining",
-    widget_layout: "detailed",
-    widget_visible: true,
+    widgets: {},
     notify: { enabled: true, session_threshold: 80, weekly_threshold: 80, on_reset: true },
     history_retention_days: 30,
     org_name: "",
@@ -40,9 +36,9 @@
   };
 
   let s = $state<Settings>(structuredClone(DEFAULTS));
-  let session = $state<SessionStatus>({ logged_in: false, org_name: "", email: "" });
+  let services = $state<ServiceStatus[]>([]);
   let autostart = $state(false);
-  let signingIn = $state(false);
+  let signingIn = $state<string | null>(null);
   let version = $state("0.0.1");
   let updateInfo = $state<UpdateInfo | null>(null);
   let updateChecking = $state(false);
@@ -57,7 +53,7 @@
     } catch {
       /* preview */
     }
-    await refreshSession();
+    await refreshServices();
     try {
       autostart = await getAutostart();
     } catch {
@@ -77,9 +73,9 @@
         await listen<string>("theme://changed", (e) => applyTheme(e.payload as Theme)),
       );
       unlisteners.push(
-        await listen<SessionStatus>("session://changed", (e) => {
-          session = e.payload;
-          signingIn = false;
+        await listen("session://changed", () => {
+          signingIn = null;
+          void refreshServices();
         }),
       );
       // Startup update check emits this when a newer signed release exists.
@@ -90,7 +86,7 @@
       // account panel is correct after signing in/out from elsewhere.
       unlisteners.push(
         await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-          if (focused) void refreshSession();
+          if (focused) void refreshServices();
         }),
       );
     } catch {
@@ -139,33 +135,35 @@
     }
   }
 
-  async function refreshSession() {
+  async function refreshServices() {
     try {
-      session = await getSessionStatus();
+      services = await getServicesStatus();
     } catch {
       /* preview */
     }
   }
 
-  async function signIn() {
-    signingIn = true;
+  async function signIn(service: string) {
+    signingIn = service;
     try {
-      await openLoginWindow();
+      await openLoginWindow(service);
+    } catch {
+      // Login for this service may not be available yet (e.g. Antigravity before OAuth).
     } finally {
-      // The login window is now open; capture is driven by Rust and a
-      // `session://changed` event updates the signed-in state on success. Reset the
-      // button so it never sticks in "waiting" if the user cancels the login window.
-      signingIn = false;
+      // The login window is now open (Claude); capture is driven by Rust and a
+      // `session://changed` event refreshes the account list. Reset the button so it never
+      // sticks in "waiting" if the user cancels the login window.
+      signingIn = null;
     }
   }
 
-  async function signOut() {
+  async function signOut(service: string) {
     try {
-      await clearSession();
+      await clearSession(service);
     } catch {
       /* preview */
     }
-    session = { logged_in: false, org_name: "", email: "" };
+    await refreshServices();
   }
 
   async function checkUpdate() {
@@ -196,6 +194,14 @@
     }
   }
 
+  async function openStyle() {
+    try {
+      await openStyleWindow();
+    } catch {
+      /* preview */
+    }
+  }
+
   const intervals = [1, 5, 10, 15, 30];
   const thresholds = [50, 60, 70, 80, 90, 95];
 </script>
@@ -205,22 +211,28 @@
   <main>
   <section>
     <h2>{$t("settings.section.account")}</h2>
-    <div class="account">
-      {#if session.logged_in}
+    {#each services as svc (svc.id)}
+      <div class="account">
         <div class="acct">
-          <span class="acct-name">{session.org_name || "Claude"}</span>
-          {#if session.email}
-            <span class="acct-email">{session.email}</span>
+          <span class="acct-name">{svc.name}</span>
+          {#if svc.logged_in}
+            <span class="acct-email">{svc.email || svc.org_name || ""}</span>
+          {:else}
+            <span class="acct-email">{$t("settings.signedOut")}</span>
           {/if}
         </div>
-        <button class="btn" onclick={signOut}>{$t("settings.signOut")}</button>
-      {:else}
-        <span class="status">{$t("settings.signedOut")}</span>
-        <button class="btn primary" onclick={signIn} disabled={signingIn}>
-          {signingIn ? $t("settings.signingIn") : $t("settings.signIn")}
-        </button>
-      {/if}
-    </div>
+        {#if svc.logged_in}
+          <button class="btn" onclick={() => signOut(svc.id)}>{$t("settings.signOut")}</button>
+        {:else}
+          <button
+            class="btn primary"
+            onclick={() => signIn(svc.id)}
+            disabled={signingIn === svc.id}>
+            {signingIn === svc.id ? $t("settings.signingIn") : $t("settings.signIn")}
+          </button>
+        {/if}
+      </div>
+    {/each}
   </section>
 
   <section>
@@ -267,63 +279,9 @@
 
   <section>
     <h2>{$t("settings.section.widget")}</h2>
-
     <div class="row">
-      <label for="display">{$t("settings.trayDisplay")}</label>
-      <select
-        id="display"
-        value={s.tray_display}
-        onchange={(e) => {
-          s.tray_display = e.currentTarget.value as "remaining" | "used";
-          save();
-        }}>
-        <option value="remaining">{$t("common.remaining")}</option>
-        <option value="used">{$t("common.used")}</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label for="layout">{$t("settings.widgetLayout")}</label>
-      <select
-        id="layout"
-        value={s.widget_layout}
-        onchange={(e) => {
-          s.widget_layout = e.currentTarget.value as "detailed" | "compact";
-          save();
-        }}>
-        <option value="detailed">{$t("settings.layout.detailed")}</option>
-        <option value="compact">{$t("settings.layout.compact")}</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label for="opacity">{$t("settings.widgetOpacity")}</label>
-      <div class="slider">
-        <input
-          id="opacity"
-          type="range"
-          min="0.3"
-          max="1"
-          step="0.05"
-          value={s.widget_opacity}
-          onchange={(e) => {
-            s.widget_opacity = Number(e.currentTarget.value);
-            save();
-          }} />
-        <span class="pct">{Math.round(s.widget_opacity * 100)}%</span>
-      </div>
-    </div>
-
-    <div class="row">
-      <label for="aot">{$t("widget.alwaysOnTop")}</label>
-      <input
-        id="aot"
-        type="checkbox"
-        checked={s.always_on_top}
-        onchange={(e) => {
-          s.always_on_top = e.currentTarget.checked;
-          save();
-        }} />
+      <span class="status">{$t("widgetStyle.title")}</span>
+      <button class="btn" onclick={openStyle}>{$t("settings.openStyle")}</button>
     </div>
   </section>
 
@@ -471,23 +429,6 @@
     width: 17px;
     height: 17px;
     accent-color: rgb(var(--accent));
-  }
-  .slider {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 150px;
-  }
-  input[type="range"] {
-    flex: 1;
-    accent-color: rgb(var(--accent));
-  }
-  .pct {
-    font-size: 0.76rem;
-    color: rgb(var(--fg-muted));
-    width: 34px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
   }
   .account {
     display: flex;

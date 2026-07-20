@@ -10,10 +10,19 @@ use crate::{history, notify, tray};
 
 pub fn apply_snapshot(app: &AppHandle, snapshot: UsageSnapshot) {
     if let Some(state) = app.try_state::<AppState>() {
-        *state.last_snapshot.lock().unwrap() = Some(snapshot.clone());
+        state
+            .last_snapshot
+            .lock()
+            .unwrap()
+            .insert(snapshot.service_id.clone(), snapshot.clone());
         // Keep the persisted account identity (name + email) fresh so the settings
-        // account panel reflects the signed-in account even after a restart.
-        if snapshot.status == "ok" && !snapshot.organization_name.is_empty() {
+        // account panel reflects the signed-in account even after a restart. Claude's
+        // identity backs the (single) settings account fields; other services carry their
+        // own identity elsewhere.
+        if snapshot.service_id == crate::service::CLAUDE
+            && snapshot.status == "ok"
+            && !snapshot.organization_name.is_empty()
+        {
             let mut settings = state.settings.lock().unwrap();
             if settings.org_name != snapshot.organization_name
                 || settings.account_email != snapshot.account_email

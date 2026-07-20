@@ -117,33 +117,38 @@ fn schedule_single_click(app: &AppHandle) {
     });
 }
 
-fn build_tooltip(snapshot: &UsageSnapshot, loc: &str) -> String {
+/// Build the tray tooltip across all services: a header per service, then up to two headline
+/// buckets each with remaining% and the time until reset.
+fn build_tooltip(map: &std::collections::HashMap<String, UsageSnapshot>, loc: &str) -> String {
     let mut lines = Vec::new();
-    if !snapshot.organization_name.is_empty() {
-        lines.push(snapshot.organization_name.clone());
-    }
-    for b in &snapshot.buckets {
-        let label = i18n::bucket_label(loc, &b.key, &b.label);
-        lines.push(i18n::tooltip_left(loc, &label, b.remaining));
+    for id in crate::service::all() {
+        let Some(s) = map.get(*id) else { continue };
+        if s.status != "ok" {
+            continue;
+        }
+        lines.push(crate::service::display_name(id).to_string());
+        for b in s.buckets.iter().take(2) {
+            let label = i18n::bucket_label(loc, &b.key, &b.label);
+            let cd = i18n::fmt_countdown(loc, &b.resets_at);
+            lines.push(i18n::tooltip_line(loc, &label, b.remaining, &cd));
+        }
     }
     if lines.is_empty() {
-        lines.push("SessionMeter".to_string());
+        i18n::tooltip_signed_out(loc).to_string()
+    } else {
+        lines.join("\n")
     }
-    lines.join("\n")
 }
 
-/// Refresh the tray tooltip from the latest snapshot (the icon stays the fixed app icon).
+/// Refresh the tray tooltip from the latest snapshots (the icon stays the fixed app icon).
 pub fn update_tray(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
     let language = state.settings.lock().unwrap().language.clone();
     let loc = i18n::effective_locale(&language);
-    let snapshot = state.last_snapshot.lock().unwrap().clone();
-    let tooltip = match snapshot.as_ref() {
-        Some(s) if s.status == "ok" => build_tooltip(s, loc),
-        _ => i18n::tooltip_signed_out(loc).to_string(),
-    };
+    let map = state.last_snapshot.lock().unwrap().clone();
+    let tooltip = build_tooltip(&map, loc);
     let guard = state.tray.lock().unwrap();
     if let Some(t) = guard.as_ref() {
         let _ = t.set_tooltip(Some(&tooltip));

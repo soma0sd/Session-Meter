@@ -2,66 +2,101 @@
   import { onMount, onDestroy } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
-  import { t, locale } from "../lib/i18n";
+  import { t } from "../lib/i18n";
   import { initWindow } from "../lib/appinit";
   import { applyTheme, type Theme } from "../lib/theme";
   import {
     getUsage,
     getSettings,
-    setAlwaysOnTop,
-    setMoveLock,
     openSettingsWindow,
     openStatsWindow,
+    openStyleWindow,
+    setAlwaysOnTop,
+    setMoveLock,
     getUpdateState,
     installUpdate,
+    widgetConfig,
     type UsageSnapshot,
     type Settings,
     type UpdateInfo,
-    type Bucket,
   } from "../lib/ipc";
-  import { formatCountdown, formatResetDateTime } from "../lib/countdown";
+  import WidgetStyle from "../lib/widgetStyles/WidgetStyle.svelte";
+  import { DEFAULT_STYLE, colorsFor } from "../lib/widgetStyles/types";
 
-  const WIDGET_W = 252;
-  // Compact packs two fixed-size donuts, so it uses a narrower window - this halves the
-  // side margins without changing the donut size or the gap between them.
-  const WIDGET_W_COMPACT = 220;
+  // The window is sized to the panel content; this caps how wide a long label can push it.
+  const MAX_W = 360;
+  // Below this content width, the tool icons are collapsed into a kebab dropdown so they
+  // don't force the widget wider than its content.
+  const ICON_ROW_MIN = 208;
 
+  const SERVICE_NAMES: Record<string, string> = {
+    claude: "Claude",
+    antigravity: "Antigravity",
+  };
+
+  // Which service this widget window monitors, derived from its window label
+  // ("widget" == claude, "widget-{service}" otherwise).
+  function serviceFromLabel(label: string): string {
+    if (label === "widget") return "claude";
+    if (label.startsWith("widget-")) return label.slice("widget-".length);
+    return "claude";
+  }
+  const myService = (() => {
+    try {
+      return serviceFromLabel(getCurrentWindow().label);
+    } catch {
+      return "claude";
+    }
+  })();
+  const serviceName = SERVICE_NAMES[myService] ?? myService;
+
+  const KEBAB = `<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><circle cx="8" cy="3.4" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="8" cy="12.6" r="1.35"/></svg>`;
   const PIN = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h6M9.2 2.5v4.7l2.3 2.8H4.5L6.8 7.2V2.5M8 10v3.5"/></svg>`;
   const LOCK = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.3" rx="1.2"/><path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.8 0V7"/></svg>`;
   const UNLOCK = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.3" rx="1.2"/><path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.6-0.9"/></svg>`;
   const GEAR = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.1"/><path d="M8 1.7v1.7M8 12.6v1.7M14.3 8h-1.7M3.4 8H1.7M12.45 3.55l-1.2 1.2M4.75 11.25l-1.2 1.2M12.45 12.45l-1.2-1.2M4.75 4.75l-1.2-1.2"/></svg>`;
   const STATS = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 13.8V2.4M2.2 13.8h11.6M5 11.4V8.4M8 11.4V5.2M11 11.4V6.8"/></svg>`;
   const UPDATE = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.4v7.4M5.2 7l2.8 2.9L10.8 7M3.4 13.2h9.2"/></svg>`;
+  const PALETTE = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8a6.2 6.2 0 1 0 0 12.4c1 0 1.5-.8 1.5-1.5 0-.9-.8-1.3-.8-2 0-.6.5-1 1.1-1h1.3A2.8 2.8 0 0 0 14.2 7 6.3 6.3 0 0 0 8 1.8Z"/><circle cx="5.4" cy="6.2" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="4.9" r=".9" fill="currentColor" stroke="none"/><circle cx="10.6" cy="6.2" r=".9" fill="currentColor" stroke="none"/></svg>`;
 
   let snap = $state<UsageSnapshot | null>(null);
   let alwaysOnTop = $state(true);
   let moveLocked = $state(false);
   let displayMode = $state<"remaining" | "used">("remaining");
-  let layout = $state<"detailed" | "compact">("detailed");
+  let style = $state<string>(DEFAULT_STYLE);
   let now = $state(Date.now());
   let updateInfo = $state<UpdateInfo | null>(null);
   let updating = $state(false);
+  let menuOpen = $state(false);
+  let bodyWidth = $state(0);
+  // Show the icon row inline when the content is wide enough; otherwise collapse to a menu.
+  const collapsed = $derived(bodyWidth > 0 && bodyWidth < ICON_ROW_MIN);
 
   let panelEl: HTMLElement | undefined;
+  let bodyEl = $state<HTMLElement | undefined>(undefined);
   let ro: ResizeObserver | undefined;
   let timer: number | undefined;
   let unlisteners: Array<() => void> = [];
 
   function applySettings(s: Settings) {
-    alwaysOnTop = s.always_on_top;
-    moveLocked = s.move_lock;
-    displayMode = s.tray_display;
-    layout = (s.widget_layout as "detailed" | "compact") ?? "detailed";
+    const wc = widgetConfig(s, myService);
+    alwaysOnTop = wc.always_on_top;
+    moveLocked = wc.move_lock;
+    displayMode = wc.display_mode;
+    style = wc.style || DEFAULT_STYLE;
     applyTheme(s.theme as Theme);
-    document.documentElement.style.setProperty("--panel-alpha", String(s.widget_opacity));
+    document.documentElement.style.setProperty("--panel-alpha", String(wc.opacity));
   }
 
-  // Resize the window to hug the panel content so there is no empty space below it.
-  async function fitWindowHeight() {
+  // Size the window to hug the panel content (width + height), so a compact style makes a
+  // small widget and text never has to wrap.
+  async function fitWindow() {
     if (!panelEl) return;
-    const h = Math.ceil(panelEl.getBoundingClientRect().height);
-    if (h < 40) return;
-    const w = layout === "compact" ? WIDGET_W_COMPACT : WIDGET_W;
+    if (bodyEl) bodyWidth = Math.ceil(bodyEl.getBoundingClientRect().width);
+    const r = panelEl.getBoundingClientRect();
+    const w = Math.min(MAX_W, Math.ceil(r.width));
+    const h = Math.ceil(r.height);
+    if (w < 40 || h < 30) return;
     try {
       const { LogicalSize } = await import("@tauri-apps/api/dpi");
       await getCurrentWindow().setSize(new LogicalSize(w, h));
@@ -70,16 +105,27 @@
     }
   }
 
-  // Re-fit the window (including its width, for compact) whenever the layout changes.
+  // The kebab menu only exists in the collapsed header; close it when expanding.
   $effect(() => {
-    layout;
-    void fitWindowHeight();
+    if (!collapsed) menuOpen = false;
+  });
+
+  // Re-fit when the style, header layout, or the (in-flow) menu changes the content size.
+  $effect(() => {
+    style;
+    menuOpen;
+    collapsed;
+    void fitWindow();
   });
 
   onMount(async () => {
     await initWindow();
+    // Colour the widget's metrics to match the service's brand.
+    const c = colorsFor(myService);
+    document.documentElement.style.setProperty("--m1", c.m1);
+    document.documentElement.style.setProperty("--m2", c.m2);
     try {
-      snap = await getUsage();
+      snap = await getUsage(myService);
     } catch {
       /* preview */
     }
@@ -95,7 +141,9 @@
     }
     try {
       unlisteners.push(
-        await listen<UsageSnapshot>("usage://updated", (e) => (snap = e.payload)),
+        await listen<UsageSnapshot>("usage://updated", (e) => {
+          if (e.payload.service_id === myService) snap = e.payload;
+        }),
       );
       unlisteners.push(
         await listen<Settings>("settings://changed", (e) => applySettings(e.payload)),
@@ -103,18 +151,20 @@
       unlisteners.push(
         await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
       );
-      // The window is sized in logical px (DPI-independent), so it keeps the same apparent
-      // size across HD..4K. Re-fit when the scale factor changes (e.g. dragged to another
-      // monitor) so the logical size is re-asserted for the new DPI.
-      unlisteners.push(await getCurrentWindow().onScaleChanged(() => void fitWindowHeight()));
+      unlisteners.push(await getCurrentWindow().onScaleChanged(() => void fitWindow()));
+      unlisteners.push(
+        await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+          if (!focused) menuOpen = false;
+        }),
+      );
     } catch {
       /* preview */
     }
     if (panelEl && "ResizeObserver" in window) {
-      ro = new ResizeObserver(() => void fitWindowHeight());
+      ro = new ResizeObserver(() => void fitWindow());
       ro.observe(panelEl);
     }
-    void fitWindowHeight();
+    void fitWindow();
     timer = window.setInterval(() => (now = Date.now()), 1000);
   });
 
@@ -127,7 +177,7 @@
   async function toggleAoT() {
     alwaysOnTop = !alwaysOnTop;
     try {
-      await setAlwaysOnTop(alwaysOnTop);
+      await setAlwaysOnTop(myService, alwaysOnTop);
     } catch {
       /* preview */
     }
@@ -136,18 +186,32 @@
   async function toggleLock() {
     moveLocked = !moveLocked;
     try {
-      await setMoveLock(moveLocked);
+      await setMoveLock(myService, moveLocked);
     } catch {
       /* preview */
     }
   }
 
   function startDrag(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    // A click on the panel background (not a control) closes an open menu and starts a drag.
+    if (menuOpen && !target.closest(".menu") && !target.closest(".kebab")) menuOpen = false;
     if (moveLocked || e.button !== 0) return;
-    if ((e.target as HTMLElement).closest("button")) return;
+    if (target.closest("button")) return;
     getCurrentWindow()
       .startDragging()
       .catch(() => {});
+  }
+
+  function toggleMenu(e: MouseEvent) {
+    e.stopPropagation();
+    menuOpen = !menuOpen;
+  }
+
+  // Navigation items close the menu; toggle items keep it open so several can be flipped.
+  function nav(fn: () => void) {
+    menuOpen = false;
+    fn();
   }
 
   async function openSettings() {
@@ -166,6 +230,14 @@
     }
   }
 
+  async function openStyle() {
+    try {
+      await openStyleWindow();
+    } catch {
+      /* preview */
+    }
+  }
+
   async function doUpdate() {
     updating = true;
     try {
@@ -174,79 +246,62 @@
       updating = false;
     }
   }
-
-  const buckets = $derived(snap?.buckets ?? []);
-  const localeTag = $derived($locale === "ko" ? "ko-KR" : "en-US");
-
-  function fmtResetAt(iso: string): string {
-    return formatResetDateTime(iso, localeTag, $t("common.today"), $t("common.tomorrow"));
-  }
-
-  function barColor(remaining: number): string {
-    return remaining < 20
-      ? "rgb(var(--danger))"
-      : remaining < 50
-        ? "rgb(var(--warn))"
-        : "rgb(var(--ok))";
-  }
-
-  // --- compact (donut) layout ---
-  const DONUT_R = 40;
-  const DONUT_CIRC = 2 * Math.PI * DONUT_R;
-  function donutDash(shown: number): string {
-    const on = (Math.max(0, Math.min(100, shown)) / 100) * DONUT_CIRC;
-    return `${on} ${DONUT_CIRC - on}`;
-  }
-  // Compact mode shows the current session + weekly on one row; fall back to the first two
-  // buckets if those exact keys are absent.
-  const compactBuckets = $derived.by(() => {
-    const pick = [
-      buckets.find((b) => b.key === "five_hour"),
-      buckets.find((b) => b.key === "seven_day"),
-    ].filter(Boolean) as Bucket[];
-    return pick.length ? pick : buckets.slice(0, 2);
-  });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="panel" class:compact={layout === "compact"} bind:this={panelEl} onmousedown={startDrag}>
+<div class="panel" bind:this={panelEl} onmousedown={startDrag}>
   <header>
-    {#if layout !== "compact"}
-      <span class="title">{$t("app.name")}</span>
-    {/if}
-    <div class="tools">
-      {#if updateInfo?.available}
-        <button
-          class="tool update"
-          title={$t("widget.update", { version: updateInfo.version })}
-          aria-label={$t("widget.update", { version: updateInfo.version })}
-          disabled={updating}
-          onclick={doUpdate}>{@html UPDATE}</button>
-      {/if}
+    <span class="title">{serviceName}</span>
+    {#if collapsed}
       <button
-        class="tool"
-        title={$t("common.stats")}
-        aria-label={$t("common.stats")}
-        onclick={openStats}>{@html STATS}</button>
-      <button
-        class="tool"
+        class="kebab"
+        class:on={menuOpen}
         title={$t("common.settings")}
         aria-label={$t("common.settings")}
-        onclick={openSettings}>{@html GEAR}</button>
-      <button
-        class="tool"
-        class:active={alwaysOnTop}
-        title={$t("widget.alwaysOnTop")}
-        aria-label={$t("widget.alwaysOnTop")}
-        onclick={toggleAoT}>{@html PIN}</button>
-      <button
-        class="tool"
-        class:active={moveLocked}
-        title={$t("widget.moveLock")}
-        aria-label={$t("widget.moveLock")}
-        onclick={toggleLock}>{@html moveLocked ? LOCK : UNLOCK}</button>
-    </div>
+        onclick={toggleMenu}>{@html KEBAB}</button>
+    {:else}
+      <div class="tools">
+        {#if updateInfo?.available}
+          <button
+            class="tool update"
+            disabled={updating}
+            title={$t("widget.update", { version: updateInfo.version })}
+            aria-label={$t("widget.update", { version: updateInfo.version })}
+            onclick={doUpdate}>{@html UPDATE}</button>
+        {/if}
+        <button class="tool" title={$t("common.stats")} aria-label={$t("common.stats")} onclick={openStats}>{@html STATS}</button>
+        <button class="tool" title={$t("widgetStyle.title")} aria-label={$t("widgetStyle.title")} onclick={openStyle}>{@html PALETTE}</button>
+        <button class="tool" title={$t("common.settings")} aria-label={$t("common.settings")} onclick={openSettings}>{@html GEAR}</button>
+        <button class="tool" class:active={alwaysOnTop} title={$t("widget.alwaysOnTop")} aria-label={$t("widget.alwaysOnTop")} onclick={toggleAoT}>{@html PIN}</button>
+        <button class="tool" class:active={moveLocked} title={$t("widget.moveLock")} aria-label={$t("widget.moveLock")} onclick={toggleLock}>{@html moveLocked ? LOCK : UNLOCK}</button>
+      </div>
+    {/if}
   </header>
+
+  {#if collapsed && menuOpen}
+    <div class="menu">
+      {#if updateInfo?.available}
+        <button class="mitem accent" disabled={updating} onclick={() => nav(doUpdate)}>
+          {@html UPDATE}<span>{$t("widget.update", { version: updateInfo.version })}</span>
+        </button>
+      {/if}
+      <button class="mitem" class:on={alwaysOnTop} onclick={toggleAoT}>
+        {@html PIN}<span>{$t("widget.alwaysOnTop")}</span>
+      </button>
+      <button class="mitem" class:on={moveLocked} onclick={toggleLock}>
+        {@html moveLocked ? LOCK : UNLOCK}<span>{$t("widget.moveLock")}</span>
+      </button>
+      <button class="mitem" onclick={() => nav(openStyle)}>
+        {@html PALETTE}<span>{$t("widgetStyle.title")}</span>
+      </button>
+      <button class="mitem" onclick={() => nav(openStats)}>
+        {@html STATS}<span>{$t("common.stats")}</span>
+      </button>
+      <button class="mitem" onclick={() => nav(openSettings)}>
+        {@html GEAR}<span>{$t("common.settings")}</span>
+      </button>
+    </div>
+  {/if}
 
   {#if snap === null}
     <div class="empty">{$t("common.loading")}</div>
@@ -254,54 +309,9 @@
     <div class="empty">
       {snap.status === "unauthorized" ? $t("common.sessionExpired") : $t("common.notLoggedIn")}
     </div>
-  {:else if layout === "compact"}
-    <div class="donuts">
-      {#each compactBuckets as b (b.key)}
-        {@const shown = displayMode === "remaining" ? b.remaining : b.utilization}
-        {@const remainMs = Math.max(0, Date.parse(b.resets_at) - now)}
-        <div class="donut">
-          <svg class="ring" viewBox="0 0 100 100">
-            <circle class="track" cx="50" cy="50" r={DONUT_R} />
-            {#if shown > 0}
-              <circle
-                class="value"
-                cx="50"
-                cy="50"
-                r={DONUT_R}
-                stroke={barColor(b.remaining)}
-                stroke-dasharray={donutDash(shown)}
-                transform="rotate(-90 50 50)" />
-            {/if}
-            <text class="num" x="50" y="45" text-anchor="middle" dominant-baseline="central"
-              >{shown}%</text>
-            {#if b.resets_at}
-              <text class="sub" x="50" y="70" text-anchor="middle" dominant-baseline="central"
-                >{formatCountdown(remainMs, $locale)}</text>
-            {/if}
-          </svg>
-        </div>
-      {/each}
-    </div>
   {:else}
-    <div class="rows">
-      {#each buckets as b (b.key)}
-        {@const localized = $t("bucket." + b.key)}
-        {@const label = localized.startsWith("bucket.") ? b.label : localized}
-        {@const shown = displayMode === "remaining" ? b.remaining : b.utilization}
-        {@const remainMs = Math.max(0, Date.parse(b.resets_at) - now)}
-        <div class="row">
-          <div class="rowtop">
-            <span class="label">{label}</span>
-            <span class="pct">{shown}%</span>
-          </div>
-          <div class="bar">
-            <div class="fill" style="width:{shown}%; background:{barColor(b.remaining)}"></div>
-          </div>
-          {#if b.resets_at}
-            <div class="reset">{fmtResetAt(b.resets_at)} · {formatCountdown(remainMs, $locale)}</div>
-          {/if}
-        </div>
-      {/each}
+    <div class="body" bind:this={bodyEl}>
+      <WidgetStyle styleId={style} snapshot={snap} {now} {displayMode} />
     </div>
   {/if}
 </div>
@@ -310,9 +320,11 @@
   .panel {
     display: flex;
     flex-direction: column;
-    padding: 9px 11px 10px;
+    /* Hug the content so the window can shrink to it (set by fitWindow). */
+    width: max-content;
+    max-width: 360px;
+    padding: 8px 10px 9px;
     background: rgb(var(--panel));
-    /* Whole-widget translucency (over a transparent window) driven by the opacity setting. */
     opacity: var(--panel-alpha);
     color: rgb(var(--fg));
     border: 1px solid rgb(var(--border));
@@ -325,29 +337,45 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     margin-bottom: 7px;
+    white-space: nowrap;
   }
   .title {
     font-size: 0.74rem;
     font-weight: 700;
     letter-spacing: 0.02em;
     color: rgb(var(--fg-muted));
+    white-space: nowrap;
+  }
+  .kebab {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgb(var(--fg-muted));
+    cursor: default;
+    flex-shrink: 0;
+  }
+  .kebab:hover,
+  .kebab.on {
+    background: rgb(var(--accent) / 0.14);
+    color: rgb(var(--fg));
   }
   .tools {
     display: flex;
     gap: 2px;
-    /* Keep the tools right-aligned even when the title is hidden (compact mode). */
-    margin-left: auto;
-  }
-  /* Compact mode: trim the outer padding so the side margins match the inter-donut gap. */
-  .panel.compact {
-    padding: 7px 6px 8px;
+    flex-shrink: 0;
   }
   .tool {
     display: grid;
     place-items: center;
-    width: 24px;
-    height: 22px;
+    width: 22px;
+    height: 20px;
     padding: 0;
     border: 0;
     border-radius: 6px;
@@ -365,103 +393,55 @@
   .tool.update {
     color: rgb(var(--accent));
   }
-  .tool.update:hover {
-    background: rgb(var(--accent) / 0.18);
-    color: rgb(var(--accent));
-  }
   .tool.update:disabled {
     opacity: 0.6;
-    cursor: default;
   }
-  .rows {
+  .menu {
     display: flex;
     flex-direction: column;
-    gap: 9px;
-    max-height: 320px;
-    overflow-y: auto;
+    gap: 1px;
+    margin-bottom: 7px;
+    padding: 3px;
+    border: 1px solid rgb(var(--border));
+    border-radius: 8px;
+    background: rgb(var(--panel));
   }
-  .row {
+  .mitem {
     display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-  .rowtop {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-  }
-  .label {
-    font-size: 0.76rem;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
     color: rgb(var(--fg));
+    font-size: 0.76rem;
+    text-align: left;
+    cursor: default;
+    white-space: nowrap;
   }
-  .pct {
-    font-size: 0.82rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
+  .mitem:hover {
+    background: rgb(var(--accent) / 0.14);
   }
-  .bar {
-    height: 6px;
-    border-radius: 3px;
-    background: rgb(var(--track));
-    overflow: hidden;
+  .mitem.on {
+    color: rgb(var(--accent));
   }
-  .fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.4s ease;
+  .mitem.accent {
+    color: rgb(var(--accent));
+    font-weight: 600;
   }
-  .reset {
-    font-size: 0.66rem;
-    color: rgb(var(--fg-muted));
-    font-variant-numeric: tabular-nums;
+  .mitem:disabled {
+    opacity: 0.6;
   }
-  .donuts {
+  .body {
     display: flex;
-    justify-content: center;
-    gap: 18px;
-  }
-  .donut {
-    display: flex;
-  }
-  .ring {
-    display: block;
-    width: 84px;
-    height: 84px;
-  }
-  .ring .track {
-    fill: none;
-    stroke: rgb(var(--track));
-    stroke-width: 11;
-  }
-  .ring .value {
-    fill: none;
-    stroke-width: 11;
-    stroke-linecap: round;
-    transition: stroke-dasharray 0.4s ease;
-  }
-  .ring .num {
-    fill: rgb(var(--fg));
-    font-size: 24px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  .ring .sub {
-    fill: rgb(var(--fg));
-    font-size: 17px;
-    font-variant-numeric: tabular-nums;
-  }
-  /* Halo in the panel colour so the numbers stay readable where they cross the ring. */
-  .ring .num,
-  .ring .sub {
-    paint-order: stroke;
-    stroke: rgb(var(--panel));
-    stroke-width: 3.5px;
-    stroke-linejoin: round;
+    flex-direction: column;
   }
   .empty {
     text-align: center;
     font-size: 0.74rem;
     color: rgb(var(--fg-muted));
     padding: 12px 8px;
+    white-space: nowrap;
   }
 </style>

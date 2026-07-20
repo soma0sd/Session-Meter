@@ -1,9 +1,11 @@
-//! Settings persistence (tauri-plugin-store) and the session secret.
-//! The claude.ai cookie is a credential, kept in a dedicated per-user file
-//! (`session.dat`, see SESSION_FILE below), separate from the settings store.
+//! Settings persistence and the session secret.
+//! Settings persist via direct atomic file writes (NOT tauri-plugin-store): see
+//! `write_json_atomic`. The claude.ai cookie is a credential, kept in a dedicated per-user
+//! file (`session.dat`, see SESSION_FILE below), separate from the settings files.
 //! On Windows the file is encrypted at rest with DPAPI (per-user scope); on other
 //! platforms it is a user-scoped plaintext file. See the SESSION_FILE comment.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -20,12 +22,19 @@ use crate::error::AppError;
 const SETTINGS_FILE: &str = "settings.json";
 const WINDOW_FILE: &str = "window.json";
 
-// The session cookie is stored as a file in the per-user app data dir. The OS keyring
-// (Windows Credential Manager) caps a credential blob at ~2560 bytes, which the full
-// claude.ai cookie string (Cloudflare + session cookies) exceeds, so keyring is unusable.
-// On Windows the bytes are encrypted at rest with DPAPI (per-user scope); on other
-// platforms the file is user-scoped plaintext (best-effort).
-const SESSION_FILE: &str = "session.dat";
+// Each service's session credential is stored as a file in the per-user app data dir. The
+// OS keyring (Windows Credential Manager) caps a credential blob at ~2560 bytes, which the
+// full claude.ai cookie string (Cloudflare + session cookies) exceeds, so keyring is
+// unusable. On Windows the bytes are encrypted at rest with DPAPI (per-user scope); on
+// other platforms the file is user-scoped plaintext (best-effort). Claude keeps the legacy
+// `session.dat` filename so existing sessions survive the multi-service upgrade (no re-login).
+fn session_file(service: &str) -> String {
+    if service == "claude" {
+        "session.dat".to_string()
+    } else {
+        format!("session.{service}.dat")
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -49,18 +58,40 @@ impl Default for NotifySettings {
     }
 }
 
+/// Per-service widget appearance + behavior. Stored per service id in `Settings::widgets`,
+/// configured from the "Widget style" window.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct WidgetConfig {
+    pub style: String,        // style catalog id, e.g. "focus-slim-detailed"
+    pub display_mode: String, // remaining | used (the widget's number display mode)
+    pub opacity: f64,
+    pub always_on_top: bool,
+    pub move_lock: bool,
+    pub visible: bool, // desired widget visibility (a watchdog keeps the window in sync)
+}
+
+impl Default for WidgetConfig {
+    fn default() -> Self {
+        Self {
+            style: "focus-slim-detailed".to_string(),
+            display_mode: "remaining".to_string(),
+            opacity: 0.9,
+            always_on_top: true,
+            move_lock: false,
+            visible: true,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
     pub theme: String,    // light | dark | system
     pub language: String, // auto | ko | en
-    pub widget_opacity: f64,
     pub refresh_interval_min: u64,
-    pub always_on_top: bool,
-    pub move_lock: bool,
-    pub tray_display: String,  // remaining | used
-    pub widget_layout: String, // detailed | compact
-    pub widget_visible: bool,  // desired widget visibility (watchdog keeps the window in sync)
+    /// Per-service widget config, keyed by service id ("claude", "antigravity", ...).
+    pub widgets: HashMap<String, WidgetConfig>,
     pub notify: NotifySettings,
     pub history_retention_days: u32,
     pub org_name: String,
@@ -72,18 +103,20 @@ impl Default for Settings {
         Self {
             theme: "system".to_string(),
             language: "auto".to_string(),
-            widget_opacity: 0.9,
             refresh_interval_min: 5,
-            always_on_top: true,
-            move_lock: false,
-            tray_display: "remaining".to_string(),
-            widget_layout: "detailed".to_string(),
-            widget_visible: true,
+            widgets: HashMap::new(),
             notify: NotifySettings::default(),
             history_retention_days: 30,
             org_name: String::new(),
             account_email: String::new(),
         }
+    }
+}
+
+impl Settings {
+    /// The widget config for a service, falling back to defaults when unset.
+    pub fn widget(&self, service: &str) -> WidgetConfig {
+        self.widgets.get(service).cloned().unwrap_or_default()
     }
 }
 
@@ -144,8 +177,12 @@ pub fn load(app: &AppHandle) -> Settings {
     if legacy.is_some() {
         migrate_widget_pos(app, &dir, &v);
     }
-    match serde_json::from_value::<Settings>(legacy.unwrap_or(v)) {
-        Ok(s) => s,
+    let source = legacy.unwrap_or(v);
+    match serde_json::from_value::<Settings>(source.clone()) {
+        Ok(mut s) => {
+            migrate_widgets(&mut s, &source);
+            s
+        }
         Err(_) => {
             // Valid JSON but the wrong shape (e.g. a hand-edit with a mistyped field): back
             // it up rather than silently discarding the user's settings.
@@ -153,6 +190,41 @@ pub fn load(app: &AppHandle) -> Settings {
             Settings::default()
         }
     }
+}
+
+/// One-time upgrade: seed the Claude widget config from the pre-0.4 flat widget fields (or
+/// defaults) so the widget keeps its style/opacity/visibility across the multi-service update.
+fn migrate_widgets(settings: &mut Settings, source: &serde_json::Value) {
+    if !settings.widgets.is_empty() {
+        return;
+    }
+    let mut wc = WidgetConfig::default();
+    if let Some(x) = source.get("widget_style").and_then(|x| x.as_str()) {
+        wc.style = x.to_string();
+    } else if let Some(x) = source.get("widget_layout").and_then(|x| x.as_str()) {
+        // Even older builds stored a detailed/compact layout; map it onto a Focus & Slim style.
+        wc.style = if x == "compact" {
+            "focus-slim-compact".to_string()
+        } else {
+            "focus-slim-detailed".to_string()
+        };
+    }
+    if let Some(x) = source.get("tray_display").and_then(|x| x.as_str()) {
+        wc.display_mode = x.to_string();
+    }
+    if let Some(x) = source.get("widget_opacity").and_then(|x| x.as_f64()) {
+        wc.opacity = x;
+    }
+    if let Some(x) = source.get("always_on_top").and_then(|x| x.as_bool()) {
+        wc.always_on_top = x;
+    }
+    if let Some(x) = source.get("move_lock").and_then(|x| x.as_bool()) {
+        wc.move_lock = x;
+    }
+    if let Some(x) = source.get("widget_visible").and_then(|x| x.as_bool()) {
+        wc.visible = x;
+    }
+    settings.widgets.insert("claude".to_string(), wc);
 }
 
 fn backup_corrupt(path: &Path, dir: &Path) {
@@ -170,7 +242,7 @@ fn migrate_widget_pos(app: &AppHandle, dir: &Path, v: &serde_json::Value) {
         v.pointer("/widget_pos/x").and_then(serde_json::Value::as_i64),
         v.pointer("/widget_pos/y").and_then(serde_json::Value::as_i64),
     ) {
-        save_widget_pos(app, x as i32, y as i32);
+        save_widget_pos(app, "claude", x as i32, y as i32);
     }
 }
 
@@ -179,29 +251,47 @@ pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), AppError> {
     write_json_atomic(&dir.join(SETTINGS_FILE), settings)
 }
 
-// --- widget position (its own file, so position churn never rewrites settings.json) ---
+// --- widget position, per service (its own file, so churn never rewrites settings.json) ---
 
-pub fn load_widget_pos(app: &AppHandle) -> Option<(i32, i32)> {
+pub fn load_widget_pos(app: &AppHandle, service: &str) -> Option<(i32, i32)> {
     let v: serde_json::Value = read_json_file(&data_dir(app)?.join(WINDOW_FILE))?;
-    let x = v.get("x")?.as_i64()? as i32;
-    let y = v.get("y")?.as_i64()? as i32;
+    // New shape: { "claude": {x,y}, ... }. Legacy shape (pre-0.4): a bare { x, y } == Claude.
+    let legacy = if service == "claude" && v.get("x").is_some() {
+        Some(&v)
+    } else {
+        None
+    };
+    let node = v.get(service).or(legacy)?;
+    let x = node.get("x")?.as_i64()? as i32;
+    let y = node.get("y")?.as_i64()? as i32;
     Some((x, y))
 }
 
-pub fn save_widget_pos(app: &AppHandle, x: i32, y: i32) {
-    if let Some(dir) = data_dir(app) {
-        let _ = write_json_atomic(&dir.join(WINDOW_FILE), &serde_json::json!({ "x": x, "y": y }));
+pub fn save_widget_pos(app: &AppHandle, service: &str, x: i32, y: i32) {
+    let Some(dir) = data_dir(app) else {
+        return;
+    };
+    let path = dir.join(WINDOW_FILE);
+    let mut v = read_json_file::<serde_json::Value>(&path).unwrap_or_else(|| serde_json::json!({}));
+    if !v.is_object() {
+        v = serde_json::json!({});
     }
+    v[service] = serde_json::json!({ "x": x, "y": y });
+    let _ = write_json_atomic(&path, &v);
 }
 
-// --- session cookie (user-scoped file; DPAPI-encrypted on Windows) ---
+// --- session credential (per service; user-scoped file; DPAPI-encrypted on Windows) ---
 
-fn session_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_data_dir().ok().map(|d| d.join(SESSION_FILE))
+fn session_path(app: &AppHandle, service: &str) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join(session_file(service)))
 }
 
-pub fn save_cookie(app: &AppHandle, cookie: &str) -> Result<(), AppError> {
-    let path = session_path(app).ok_or_else(|| AppError::Other("no app data dir".to_string()))?;
+pub fn save_cookie(app: &AppHandle, service: &str, cookie: &str) -> Result<(), AppError> {
+    let path =
+        session_path(app, service).ok_or_else(|| AppError::Other("no app data dir".to_string()))?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -209,8 +299,8 @@ pub fn save_cookie(app: &AppHandle, cookie: &str) -> Result<(), AppError> {
     std::fs::write(&path, bytes).map_err(|e| AppError::Other(e.to_string()))
 }
 
-pub fn load_cookie(app: &AppHandle) -> Option<String> {
-    let raw = std::fs::read(session_path(app)?).ok()?;
+pub fn load_cookie(app: &AppHandle, service: &str) -> Option<String> {
+    let raw = std::fs::read(session_path(app, service)?).ok()?;
     if raw.is_empty() {
         return None;
     }
@@ -220,8 +310,8 @@ pub fn load_cookie(app: &AppHandle) -> Option<String> {
     String::from_utf8(plain).ok().filter(|s| !s.trim().is_empty())
 }
 
-pub fn clear_cookie(app: &AppHandle) -> Result<(), AppError> {
-    if let Some(path) = session_path(app) {
+pub fn clear_cookie(app: &AppHandle, service: &str) -> Result<(), AppError> {
+    if let Some(path) = session_path(app, service) {
         let _ = std::fs::remove_file(path);
     }
     Ok(())

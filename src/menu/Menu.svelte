@@ -8,23 +8,29 @@
     toggleWidget,
     openStatsWindow,
     openSettingsWindow,
+    openStyleWindow,
     getUpdateState,
+    getSettings,
+    widgetConfig,
     installUpdate,
     quitApp,
     type UpdateInfo,
+    type Settings,
   } from "../lib/ipc";
 
   const MENU_W = 196;
 
   type Item = { key: string; label: string; action: () => Promise<unknown> };
 
-  // Usage refreshes automatically on the poll interval, so the menu has no manual refresh.
+  // Usage refreshes automatically on the poll interval, so the menu has no manual refresh. The
+  // widget show/hide is a toggle switch (below), not a plain row.
   const items: Item[] = [
-    { key: "widget", label: "menu.widget", action: toggleWidget },
+    { key: "style", label: "menu.style", action: openStyleWindow },
     { key: "stats", label: "menu.stats", action: openStatsWindow },
     { key: "settings", label: "menu.settings", action: openSettingsWindow },
   ];
 
+  let widgetShown = $state(true);
   let updateInfo = $state<UpdateInfo | null>(null);
   let navEl: HTMLElement | undefined;
   let ro: ResizeObserver | undefined;
@@ -44,6 +50,12 @@
     }
   }
 
+  function readWidgetShown(s: Settings) {
+    // The toggle reflects the widgets' desired visibility (they move together); use Claude's flag
+    // as the representative state.
+    widgetShown = widgetConfig(s, "claude").visible;
+  }
+
   onMount(async () => {
     await initWindow();
     try {
@@ -52,8 +64,16 @@
       /* preview */
     }
     try {
+      readWidgetShown(await getSettings());
+    } catch {
+      /* preview */
+    }
+    try {
       unlisteners.push(
         await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
+      );
+      unlisteners.push(
+        await listen<Settings>("settings://changed", (e) => readWidgetShown(e.payload)),
       );
     } catch {
       /* preview */
@@ -97,6 +117,17 @@
     }
   }
 
+  // Toggle the widgets' visibility. Unlike the other rows this does NOT close the menu, so the
+  // switch visibly flips (the menu still auto-hides on focus loss).
+  async function toggleWidgetSwitch() {
+    widgetShown = !widgetShown;
+    try {
+      await toggleWidget();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   async function quit() {
     try {
       await quitApp();
@@ -113,6 +144,17 @@
     </button>
     <div class="sep"></div>
   {/if}
+  <button
+    class="item toggle"
+    type="button"
+    role="switch"
+    aria-checked={widgetShown}
+    onclick={toggleWidgetSwitch}
+  >
+    <span>{$t("menu.widget")}</span>
+    <span class="switch" class:on={widgetShown}><span class="knob"></span></span>
+  </button>
+  <div class="sep"></div>
   {#each items as item (item.key)}
     <button class="item" type="button" onclick={() => run(item)}>
       {$t(item.label)}
@@ -162,6 +204,38 @@
   }
   .item.danger:hover {
     background: rgb(var(--danger) / 0.16);
+  }
+  .item.toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .switch {
+    position: relative;
+    flex: none;
+    width: 30px;
+    height: 17px;
+    border-radius: 999px;
+    background: rgb(var(--border));
+    transition: background 0.12s ease;
+  }
+  .switch.on {
+    background: rgb(var(--accent));
+  }
+  .knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: rgb(var(--panel));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+    transition: transform 0.12s ease;
+  }
+  .switch.on .knob {
+    transform: translateX(13px);
   }
   .sep {
     height: 1px;

@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [0.4] - 2026-07-19
+
+### Added
+
+- **Multi-service monitoring**: alongside Claude, SessionMeter can now track **Antigravity
+  (Gemini subscription)** usage. Sign-in happens in a dedicated window running in a separate
+  process, so a problem loading the sign-in page can't affect the rest of the app. There is no
+  official API, so this relies on screen scraping and is offered as experimental.
+- **Widget style window**: pick, **per service**, from 10 styles — five graphic concepts
+  (horizontal bars, concentric rings, dual semi-arc, vertical pillars, hex rings), each in a
+  detailed or compact variant. Includes a live preview and a remaining/used display toggle.
+- **Per-service widgets**: each signed-in service gets its own widget window, with the service
+  name shown in the title bar.
+- **Per-service statistics tabs**: the statistics window separates each signed-in service into
+  its own tab.
+- **Separate dev build**: running a development build uses a distinct identifier (`-dev`) so it
+  runs alongside the installed release without conflicting.
+
+### Changed
+
+- Widget settings moved from the settings window into the new **Widget style** window; the old
+  detailed/compact toggle is replaced by the 10-style picker.
+- The settings account section is now a **per-service sign-in/out list**.
+- The tray menu's widget show/hide row is now an on/off toggle switch.
+
+### Fixed
+
+- **Widget position no longer resets after an update**: each widget's position is saved right
+  before the auto-update restart, so widgets return to where you left them.
+- **The tray menu's Quit item was sometimes clipped off-screen**: the menu window now sizes to
+  its content.
+
 ## [0.3] - 2026-07-19
 
 ### Added
@@ -65,6 +97,7 @@ All notable changes to this project are documented here. The format is based on
   single instance.
 - **claude.ai session-cookie usage source**. The session is stored encrypted with Windows DPAPI.
 
+[0.4]: https://github.com/soma0sd/Session-Meter/releases
 [0.3]: https://github.com/soma0sd/Session-Meter/releases
 [0.2]: https://github.com/soma0sd/Session-Meter/releases
 [0.1]: https://github.com/soma0sd/Session-Meter/releases

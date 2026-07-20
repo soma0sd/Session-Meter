@@ -96,7 +96,8 @@ pub fn spawn_capture_watch(app: AppHandle) {
                     };
                     match crate::api::fetch_usage(&client, &cookie).await {
                         Ok(snapshot) => {
-                            let _ = crate::config::save_cookie(&app, &cookie);
+                            let _ =
+                                crate::config::save_cookie(&app, crate::service::CLAUDE, &cookie);
                             let org = snapshot.organization_name.clone();
                             let email = snapshot.account_email.clone();
                             eprintln!(

@@ -44,6 +44,10 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
             .download_and_install(|_, _| {}, || {})
             .await
             .map_err(|e| e.to_string())?;
+        // Flush widget position(s) before the updater relaunches us. The widget is hidden
+        // during teardown, so without this the last on-screen position is lost and the
+        // widget returns to its default corner after the update+restart.
+        crate::windows::persist_widgets_before_exit(app);
         app.restart();
     }
     Ok(())

@@ -9,9 +9,11 @@
     getUsage,
     getHistory,
     refreshNow,
+    getServicesStatus,
     type UsageSnapshot,
     type HistoryPoint,
     type Bucket,
+    type ServiceStatus,
   } from "../lib/ipc";
   import { formatCountdown, formatResetDateTime } from "../lib/countdown";
   import { linePathT, areaPathT, mapY } from "../lib/charts";
@@ -24,38 +26,64 @@
   let history = $state<HistoryPoint[]>([]);
   let range = $state<"24h" | "7d" | "30d">("24h");
   let now = $state(Date.now());
+  let services = $state<ServiceStatus[]>([]);
+  let activeService = $state("claude");
 
   let timer: number | undefined;
   let unlisteners: Array<() => void> = [];
 
+  const loggedIn = $derived(services.filter((x) => x.logged_in));
+
   async function loadHistory() {
     try {
-      history = await getHistory(range);
+      history = await getHistory(range, activeService);
     } catch {
       history = [];
     }
   }
 
-  onMount(async () => {
-    await initWindow();
+  // Load the active service's snapshot + history, then refresh in the background.
+  async function loadService() {
     try {
-      snap = await getUsage();
+      snap = await getUsage(activeService);
     } catch {
       /* preview */
     }
     await loadHistory();
-    // Auto-refresh on open for fresh numbers; further updates arrive via usage://updated.
-    void refreshNow()
+    void refreshNow(activeService)
       .then((s) => {
         snap = s;
         void loadHistory();
       })
       .catch(() => {});
+  }
+
+  async function switchService(id: string) {
+    if (id === activeService) return;
+    activeService = id;
+    snap = null;
+    await loadService();
+  }
+
+  onMount(async () => {
+    await initWindow();
+    try {
+      services = await getServicesStatus();
+      const li = services.filter((x) => x.logged_in);
+      if (li.length && !li.some((x) => x.id === activeService)) {
+        activeService = li[0].id;
+      }
+    } catch {
+      /* preview */
+    }
+    await loadService();
     try {
       unlisteners.push(
         await listen<UsageSnapshot>("usage://updated", (e) => {
-          snap = e.payload;
-          void loadHistory();
+          if (e.payload.service_id === activeService) {
+            snap = e.payload;
+            void loadHistory();
+          }
         }),
       );
       unlisteners.push(
@@ -152,6 +180,19 @@
 <div class="win">
   <TitleBar title={$t("stats.title")} />
   <main>
+  {#if loggedIn.length > 1}
+    <div class="tabs" role="tablist">
+      {#each loggedIn as svc (svc.id)}
+        <button
+          class="tab"
+          class:active={activeService === svc.id}
+          role="tab"
+          aria-selected={activeService === svc.id}
+          onclick={() => switchService(svc.id)}>{svc.name}</button>
+      {/each}
+    </div>
+  {/if}
+
   {#if snap && (snap.organization_name || snap.account_email || snap.subscription)}
     <div class="org">
       <span class="org-name">{snap.organization_name || "Claude"}</span>
@@ -273,6 +314,29 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid rgb(var(--border));
+    margin-bottom: 2px;
+  }
+  .tab {
+    padding: 6px 14px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: rgb(var(--fg-muted));
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .tab:hover {
+    color: rgb(var(--fg));
+  }
+  .tab.active {
+    color: rgb(var(--accent));
+    border-bottom-color: rgb(var(--accent));
   }
   .org {
     display: flex;

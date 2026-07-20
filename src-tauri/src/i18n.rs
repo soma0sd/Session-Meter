@@ -28,11 +28,48 @@ pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
     }
 }
 
-pub fn tooltip_left(loc: &str, label: &str, remaining: u8) -> String {
+/// Short "time until reset" from an ISO-8601 timestamp (e.g. "4d 12h" / "2시간 45분").
+/// Empty when the timestamp is missing/unparseable.
+pub fn fmt_countdown(loc: &str, resets_at: &str) -> String {
+    let Some(target) = crate::history::parse_iso(resets_at) else {
+        return String::new();
+    };
+    let secs = (target - time::OffsetDateTime::now_utc())
+        .whole_seconds()
+        .max(0);
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3600;
+    let mins = (secs % 3600) / 60;
     if loc == "ko" {
-        format!("{label}: {remaining}% 남음")
+        if days > 0 {
+            format!("{days}일 {hours}시간")
+        } else if hours > 0 {
+            format!("{hours}시간 {mins}분")
+        } else {
+            format!("{mins}분")
+        }
+    } else if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {mins}m")
     } else {
-        format!("{label}: {remaining}% left")
+        format!("{mins}m")
+    }
+}
+
+/// One tray-tooltip bucket line: "  Current session: 62% left · resets in 1h 59m".
+pub fn tooltip_line(loc: &str, label: &str, remaining: u8, countdown: &str) -> String {
+    let base = if loc == "ko" {
+        format!("  {label}: {remaining}% 남음")
+    } else {
+        format!("  {label}: {remaining}% left")
+    };
+    if countdown.is_empty() {
+        base
+    } else if loc == "ko" {
+        format!("{base} · {countdown} 후 초기화")
+    } else {
+        format!("{base} · resets in {countdown}")
     }
 }
 

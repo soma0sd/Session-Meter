@@ -3624,12 +3624,13 @@ dependencies = [
 
 [[package]]
 name = "sessionmeter"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tao",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -3644,6 +3645,7 @@ dependencies = [
  "tokio",
  "url",
  "windows 0.58.0",
+ "wry",
 ]
 
 [[package]]

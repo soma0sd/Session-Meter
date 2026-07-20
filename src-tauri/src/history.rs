@@ -11,17 +11,30 @@ use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 use crate::api::{self, UsageSnapshot};
 use crate::state::AppState;
 
-const FILE: &str = "history.jsonl";
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HistoryPoint {
     pub at: String,
+    /// Remaining% of the service's primary window (Claude: 5-hour).
     pub five_hour: Option<u8>,
+    /// Remaining% of the service's secondary window (Claude: weekly).
     pub weekly: Option<u8>,
 }
 
-fn history_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_data_dir().ok().map(|d| d.join(FILE))
+// Claude keeps the legacy `history.jsonl` filename so existing history is preserved across
+// the multi-service upgrade; other services get their own per-service file.
+fn history_file(service: &str) -> String {
+    if service == "claude" {
+        "history.jsonl".to_string()
+    } else {
+        format!("history.{service}.jsonl")
+    }
+}
+
+fn history_path(app: &AppHandle, service: &str) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join(history_file(service)))
 }
 
 pub fn parse_iso(s: &str) -> Option<OffsetDateTime> {
@@ -42,7 +55,7 @@ pub fn record(app: &AppHandle, snapshot: &UsageSnapshot) {
         five_hour: snapshot.five_hour.as_ref().map(|w| w.remaining),
         weekly: snapshot.weekly_primary.as_ref().map(|w| w.remaining),
     };
-    let Some(path) = history_path(app) else {
+    let Some(path) = history_path(app, &snapshot.service_id) else {
         return;
     };
     if let Some(parent) = path.parent() {
@@ -77,9 +90,9 @@ fn prune(app: &AppHandle, path: &PathBuf) {
     }
 }
 
-/// Load history within the retention window.
-pub fn load(app: &AppHandle) -> Vec<HistoryPoint> {
-    let Some(path) = history_path(app) else {
+/// Load a service's history within the retention window.
+pub fn load(app: &AppHandle, service: &str) -> Vec<HistoryPoint> {
+    let Some(path) = history_path(app, service) else {
         return Vec::new();
     };
     let Ok(content) = std::fs::read_to_string(&path) else {

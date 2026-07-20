@@ -36,8 +36,15 @@ pub struct Bucket {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct UsageSnapshot {
+    /// Which service this snapshot describes ("claude" | "antigravity").
+    pub service_id: String,
     pub five_hour: Option<WindowUsage>,
     pub weekly_primary: Option<WindowUsage>,
+    /// Bucket keys of the two headline windows the widget renders as primary/secondary.
+    /// (For Claude: "five_hour" / "seven_day".) Every service fills `five_hour`/
+    /// `weekly_primary` above with these two windows so the shared UI stays uniform.
+    pub primary_key: Option<String>,
+    pub secondary_key: Option<String>,
     pub buckets: Vec<Bucket>,
     pub organization_name: String,
     pub account_email: String,
@@ -169,8 +176,11 @@ pub fn parse_usage(raw: &Value, org_fallback: &str) -> UsageSnapshot {
         .unwrap_or_else(|| org_fallback.to_string());
 
     UsageSnapshot {
+        service_id: crate::service::CLAUDE.to_string(),
         five_hour,
         weekly_primary,
+        primary_key: Some("five_hour".to_string()),
+        secondary_key: Some("seven_day".to_string()),
         buckets,
         organization_name,
         account_email: String::new(),

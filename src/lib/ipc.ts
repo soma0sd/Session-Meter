@@ -20,8 +20,11 @@ export interface Bucket {
 export type UsageStatus = "ok" | "unauthorized" | "error";
 
 export interface UsageSnapshot {
+  service_id: string;
   five_hour: WindowUsage | null;
   weekly_primary: WindowUsage | null;
+  primary_key: string | null;
+  secondary_key: string | null;
   buckets: Bucket[];
   organization_name: string;
   account_email: string;
@@ -43,23 +46,50 @@ export interface NotifySettings {
   on_reset: boolean;
 }
 
+export interface WidgetConfig {
+  style: string;
+  display_mode: "remaining" | "used";
+  opacity: number;
+  always_on_top: boolean;
+  move_lock: boolean;
+  visible: boolean;
+}
+
 export interface Settings {
   theme: "light" | "dark" | "system";
   language: "auto" | "ko" | "en";
-  widget_opacity: number;
   refresh_interval_min: number;
-  always_on_top: boolean;
-  move_lock: boolean;
-  tray_display: "remaining" | "used";
-  widget_layout: "detailed" | "compact";
-  widget_visible: boolean;
+  /** Per-service widget config, keyed by service id. */
+  widgets: Record<string, WidgetConfig>;
   notify: NotifySettings;
   history_retention_days: number;
   org_name: string;
   account_email: string;
 }
 
+/** WidgetConfig with defaults applied for a service missing from the map. */
+export function widgetConfig(s: Settings, service: string): WidgetConfig {
+  return (
+    s.widgets?.[service] ?? {
+      style: "focus-slim-detailed",
+      display_mode: "remaining",
+      opacity: 0.9,
+      always_on_top: true,
+      move_lock: false,
+      visible: true,
+    }
+  );
+}
+
 export interface SessionStatus {
+  logged_in: boolean;
+  org_name: string;
+  email: string;
+}
+
+export interface ServiceStatus {
+  id: string;
+  name: string;
   logged_in: boolean;
   org_name: string;
   email: string;
@@ -82,7 +112,7 @@ function call<T>(cmd: string, args: Record<string, unknown> | undefined, mock: (
 function iso(offsetMs: number): string {
   return new Date(Date.now() + offsetMs).toISOString();
 }
-function mockUsage(): UsageSnapshot {
+function mockUsage(service?: string): UsageSnapshot {
   const b = (key: string, label: string, remaining: number, resetMs: number): Bucket => ({
     key,
     label,
@@ -90,14 +120,37 @@ function mockUsage(): UsageSnapshot {
     utilization: 100 - remaining,
     resets_at: iso(resetMs),
   });
+  if (service === "antigravity") {
+    const buckets = [
+      b("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", 100, 6 * 3600_000),
+      b("gemini-3-flash-preview", "Gemini 3 Flash Preview", 74, 6 * 3600_000),
+      b("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite", 92, 6 * 3600_000),
+    ];
+    return {
+      service_id: "antigravity",
+      five_hour: { remaining: 100, utilization: 0, resets_at: buckets[0].resets_at },
+      weekly_primary: { remaining: 74, utilization: 26, resets_at: buckets[1].resets_at },
+      primary_key: "gemini-3.1-pro-preview",
+      secondary_key: "gemini-3-flash-preview",
+      buckets,
+      organization_name: "you@example.com",
+      account_email: "you@example.com",
+      subscription: "Gemini Code Assist in Google One AI Pro",
+      fetched_at: iso(0),
+      status: "ok",
+    };
+  }
   const buckets = [
     b("five_hour", "5-hour session", 62, 2 * 3600_000),
     b("seven_day", "Weekly (7 days)", 88, 4 * 86_400_000),
     b("seven_day_opus", "Weekly (Opus)", 41, 4 * 86_400_000),
   ];
   return {
+    service_id: "claude",
     five_hour: { remaining: 62, utilization: 38, resets_at: buckets[0].resets_at },
     weekly_primary: { remaining: 88, utilization: 12, resets_at: buckets[1].resets_at },
+    primary_key: "five_hour",
+    secondary_key: "seven_day",
     buckets,
     organization_name: "Preview Org",
     account_email: "you@example.com",
@@ -110,13 +163,17 @@ function mockSettings(): Settings {
   return {
     theme: "system",
     language: "auto",
-    widget_opacity: 0.9,
     refresh_interval_min: 5,
-    always_on_top: true,
-    move_lock: false,
-    tray_display: "remaining",
-    widget_layout: "detailed",
-    widget_visible: true,
+    widgets: {
+      claude: {
+        style: "focus-slim-detailed",
+        display_mode: "remaining",
+        opacity: 0.9,
+        always_on_top: true,
+        move_lock: false,
+        visible: true,
+      },
+    },
     notify: { enabled: true, session_threshold: 80, weekly_threshold: 80, on_reset: true },
     history_retention_days: 30,
     org_name: "Preview Org",
@@ -136,11 +193,13 @@ function mockHistory(): HistoryPoint[] {
   return pts;
 }
 
-// --- usage ---
-export const getUsage = () => call<UsageSnapshot | null>("get_usage", undefined, mockUsage);
-export const refreshNow = () => call<UsageSnapshot>("refresh_now", undefined, mockUsage);
-export const getHistory = (range: string) =>
-  call<HistoryPoint[]>("get_history", { range }, mockHistory);
+// --- usage (per service; omit the argument for the default Claude service) ---
+export const getUsage = (service?: string) =>
+  call<UsageSnapshot | null>("get_usage", { service }, () => mockUsage(service));
+export const refreshNow = (service?: string) =>
+  call<UsageSnapshot>("refresh_now", { service }, () => mockUsage(service));
+export const getHistory = (range: string, service?: string) =>
+  call<HistoryPoint[]>("get_history", { range, service }, mockHistory);
 
 // --- settings ---
 export const getSettings = () => call<Settings>("get_settings", undefined, mockSettings);
@@ -149,33 +208,41 @@ export const setSettings = (settings: Settings) =>
 export const getEffectiveLocale = () =>
   call<"ko" | "en">("get_effective_locale", undefined, () => "en");
 
-// --- session ---
-export const getSessionStatus = () =>
-  call<SessionStatus>("get_session_status", undefined, () => ({
+// --- session (per service; omit the argument for the default Claude service) ---
+export const getSessionStatus = (service?: string) =>
+  call<SessionStatus>("get_session_status", { service }, () => ({
     logged_in: true,
     org_name: "Preview Org",
     email: "you@example.com",
   }));
-export const openLoginWindow = () => call<void>("open_login_window", undefined, () => undefined);
-export const captureSession = () =>
-  call<SessionStatus>("capture_session", undefined, () => ({
+export const getServicesStatus = () =>
+  call<ServiceStatus[]>("get_services_status", undefined, () => [
+    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com" },
+    { id: "antigravity", name: "Antigravity", logged_in: true, org_name: "you@example.com", email: "you@example.com" },
+  ]);
+export const openLoginWindow = (service?: string) =>
+  call<void>("open_login_window", { service }, () => undefined);
+export const captureSession = (service?: string) =>
+  call<SessionStatus>("capture_session", { service }, () => ({
     logged_in: true,
     org_name: "Preview Org",
     email: "you@example.com",
   }));
-export const clearSession = () => call<void>("clear_session", undefined, () => undefined);
+export const clearSession = (service?: string) =>
+  call<void>("clear_session", { service }, () => undefined);
 
 // --- windows / widget ---
 export const openSettingsWindow = () =>
   call<void>("open_settings_window", undefined, () => undefined);
 export const openStatsWindow = () => call<void>("open_stats_window", undefined, () => undefined);
+export const openStyleWindow = () => call<void>("open_style_window", undefined, () => undefined);
 export const toggleWidget = () => call<void>("toggle_widget", undefined, () => undefined);
-export const setAlwaysOnTop = (on: boolean) =>
-  call<void>("set_always_on_top", { on }, () => undefined);
-export const setMoveLock = (locked: boolean) =>
-  call<void>("set_move_lock", { locked }, () => undefined);
-export const setWidgetOpacity = (alpha: number) =>
-  call<void>("set_widget_opacity", { alpha }, () => undefined);
+export const setAlwaysOnTop = (service: string, on: boolean) =>
+  call<void>("set_always_on_top", { service, on }, () => undefined);
+export const setMoveLock = (service: string, locked: boolean) =>
+  call<void>("set_move_lock", { service, locked }, () => undefined);
+export const setWidgetOpacity = (service: string, alpha: number) =>
+  call<void>("set_widget_opacity", { service, alpha }, () => undefined);
 
 // --- system ---
 export const setAutostart = (enabled: boolean) =>

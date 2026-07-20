@@ -1,13 +1,16 @@
+mod antigravity;
 mod api;
 mod auth;
 mod commands;
 mod config;
 mod error;
+mod gemini_helper;
 mod history;
 mod i18n;
 mod icon;
 mod notify;
 mod poller;
+mod service;
 mod state;
 mod theme;
 mod tray;
@@ -23,6 +26,27 @@ use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The WebView2 loader reads this env var and applies the same browser args to EVERY WebView2
+    // environment in the process, so there is no second-environment conflict (unlike per-window
+    // additional_browser_args). We keep WRY's own default disabled features, additionally disable
+    // User-Agent Client Hints (so the Firefox UA spoof on the Gemini login window stays coherent:
+    // WebView2 otherwise leaks Edge branding via Sec-CH-UA and Google flags the mismatch), and
+    // drop the AutomationControlled blink flag. Must be set before the first webview is created.
+    #[cfg(windows)]
+    std::env::set_var(
+        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,UserAgentClientHint \
+         --disable-blink-features=AutomationControlled",
+    );
+
+    // Gemini helper mode: the main app relaunched this binary to host the Google login/scrape
+    // webview in a SEPARATE process (its own UI thread), so a wedged Google page cannot freeze the
+    // main app. Run the bare tao+wry helper and exit without building the full app.
+    if let Ok(mode) = std::env::var("SM_GEMINI_MODE") {
+        gemini_helper::run(&mode);
+        return;
+    }
+
     tauri::Builder::default()
         // Register single-instance FIRST so a second launch focuses the existing app.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -49,9 +73,9 @@ pub fn run() {
             // sign-in), so it is visible immediately. always_on_top defaults to true.
             windows::show_widget(&handle);
 
-            // First-run onboarding: if there's no saved session, also open Settings and the
-            // claude.ai login window so the user can sign in.
-            if config::load_cookie(&handle).is_none() {
+            // First-run onboarding: if there's no saved Claude session, also open Settings and
+            // the claude.ai login window so the user can sign in.
+            if config::load_cookie(&handle, service::CLAUDE).is_none() {
                 if let Some(win) = handle.get_webview_window("settings") {
                     let _ = win.show();
                     let _ = win.set_focus();
@@ -78,9 +102,11 @@ pub fn run() {
             WindowEvent::Focused(false) if window.label() == "menu" => {
                 let _ = window.hide();
             }
-            // Persist the widget position as the user drags it, so a reboot restores the
-            // last placement instead of the default corner.
-            WindowEvent::Moved(pos) if window.label() == "widget" => {
+            // Persist a service widget's position as the user drags it, so a reboot restores
+            // the last placement instead of the default corner.
+            WindowEvent::Moved(pos)
+                if windows::service_from_widget_label(window.label()).is_some() =>
+            {
                 // Windows parks a minimizing/hiding window at (-32000,-32000) and still
                 // reports is_visible()==true, so also reject the sentinel and the minimized
                 // state before persisting; otherwise a hide/minimize (e.g. during an update
@@ -90,11 +116,13 @@ pub fn run() {
                     && matches!(window.is_visible(), Ok(true))
                     && !matches!(window.is_minimized(), Ok(true))
                 {
-                    config::save_widget_pos(window.app_handle(), pos.x, pos.y);
+                    if let Some(service) = windows::service_from_widget_label(window.label()) {
+                        config::save_widget_pos(window.app_handle(), &service, pos.x, pos.y);
+                    }
                 }
             }
             WindowEvent::CloseRequested { api, .. }
-                if matches!(window.label(), "settings" | "stats" | "news") =>
+                if matches!(window.label(), "settings" | "stats" | "news" | "style") =>
             {
                 api.prevent_close();
                 let _ = window.hide();
@@ -124,11 +152,13 @@ pub fn run() {
             commands::open_news_window,
             commands::get_changelog,
             commands::get_session_status,
+            commands::get_services_status,
             commands::open_login_window,
             commands::capture_session,
             commands::clear_session,
             commands::open_settings_window,
             commands::open_stats_window,
+            commands::open_style_window,
             commands::toggle_widget,
             commands::quit_app,
             commands::set_theme,

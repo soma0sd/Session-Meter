@@ -1,7 +1,7 @@
 [package]
 name = "sessionmeter"
-version = "0.3.1"
-description = "Claude usage tray, widget, and stats for the desktop"
+version = "0.4.0"
+description = "Claude and Antigravity usage tray, widget, and stats for the desktop"
 authors = ["soma0sd"]
 license = "MIT"
 repository = "https://github.com/soma0sd/Session-Meter"
@@ -28,10 +28,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
-tokio = { version = "1", features = ["time", "sync"] }
+tokio = { version = "1", features = ["time", "sync", "net", "io-util"] }
 
 tiny-skia = "0.11"
 ab_glyph = "0.2"
+
+# Out-of-process Gemini login/scrape helper (see gemini_helper.rs). Pinned to the same versions
+# Tauri already pulls in transitively so there is no duplicate build. The helper hosts the Google
+# webview in a SEPARATE process/UI thread so a page that wedges WebView2 cannot freeze the app.
+tao = "0.35"
+wry = "0.55"
 
 thiserror = "2"
 url = "2"

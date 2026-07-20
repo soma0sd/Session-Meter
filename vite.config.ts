@@ -33,6 +33,7 @@ export default defineConfig({
         stats: resolve(__dirname, "stats.html"),
         news: resolve(__dirname, "news.html"),
         menu: resolve(__dirname, "menu.html"),
+        style: resolve(__dirname, "style.html"),
       },
     },
   },
