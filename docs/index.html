@@ -6,7 +6,7 @@
     <title>SessionMeter - 사용 설명서</title>
     <meta
       name="description"
-      content="SessionMeter 사용 설명서 - Claude 구독 사용량을 관리하는 데스크톱 앱"
+      content="SessionMeter 사용 설명서 - Claude와 Antigravity 구독 사용량을 관리하는 데스크톱 앱"
     />
     <link rel="icon" type="image/png" href="favicon.png" />
     <style>
@@ -21,6 +21,7 @@
         --warn-bg: #fff6e6;
         --warn-border: #e0a53a;
         --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        --stage: #eef1f6;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -34,6 +35,7 @@
           --warn-bg: #2a2416;
           --warn-border: #b98a2e;
           --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+          --stage: #22242e;
         }
       }
       * { box-sizing: border-box; }
@@ -74,6 +76,7 @@
         border-bottom: 2px solid var(--accent);
         display: inline-block;
       }
+      h3 { font-size: 1.02rem; margin: 20px 0 8px; }
       p, li { color: var(--fg); }
       code {
         background: var(--code-bg);
@@ -83,7 +86,7 @@
         font-size: 0.88em;
       }
       table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.94rem; }
-      th, td { text-align: left; padding: 8px 11px; border: 1px solid var(--border); }
+      th, td { text-align: left; padding: 8px 11px; border: 1px solid var(--border); vertical-align: top; }
       th { background: var(--code-bg); }
       .note {
         background: var(--code-bg);
@@ -102,25 +105,47 @@
         margin: 12px 0;
         font-size: 0.94rem;
       }
-      .shot {
+      /* Widget style gallery. The cards embed the app's own widget components rendered to
+         self-contained HTML (not screenshots), so they stay crisp at any zoom. */
+      .style-gallery {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+        gap: 16px;
+        margin: 16px 0 6px;
+      }
+      .style-card {
+        margin: 0;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--panel);
+      }
+      .style-stage {
         display: grid;
         place-items: center;
-        min-height: 130px;
-        border: 1px dashed var(--border);
-        border-radius: 10px;
+        min-height: 150px;
+        padding: 20px 14px;
+        background:
+          radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, var(--accent) 8%, var(--stage)), var(--stage));
+      }
+      .style-card figcaption {
+        padding: 8px 12px;
+        border-top: 1px solid var(--border);
+        font-size: 0.84rem;
         color: var(--muted);
-        background: var(--panel);
-        margin: 12px 0;
-        font-size: 0.85rem;
+        text-align: center;
       }
-      .shot-img {
-        display: block;
-        max-width: 100%;
-        height: auto;
-        border: 1px solid var(--border);
-        border-radius: 10px;
+      .style-card figcaption b { color: var(--fg); font-weight: 600; }
+      .render-inline {
+        display: grid;
+        place-items: center;
+        padding: 22px;
+        border-radius: 12px;
+        background:
+          radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, var(--accent) 8%, var(--stage)), var(--stage));
         margin: 12px 0;
       }
+      .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
       footer { text-align: center; padding: 26px 20px; color: var(--muted); border-top: 1px solid var(--border); font-size: 0.86rem; }
       a { color: var(--accent); }
       @media (max-width: 760px) { nav { display: none; } .layout { padding-top: 22px; } }
@@ -129,7 +154,7 @@
   <body>
     <header>
       <h1>SessionMeter</h1>
-      <p>Claude 구독 사용량 관리 데스크톱 앱 · 사용 설명서</p>
+      <p>Claude · Antigravity 구독 사용량 관리 데스크톱 앱 · 사용 설명서</p>
     </header>
 
     <div class="layout">
@@ -137,10 +162,11 @@
         <ul>
           <li><a href="#intro">소개</a></li>
           <li><a href="#install">설치</a></li>
-          <li><a href="#signin">Claude 로그인</a></li>
+          <li><a href="#signin">서비스 로그인</a></li>
           <li><a href="#tray-icon">트레이 아이콘 읽는 법</a></li>
           <li><a href="#tray-actions">트레이 조작</a></li>
           <li><a href="#widget">데스크톱 위젯</a></li>
+          <li><a href="#widget-styles">위젯 스타일</a></li>
           <li><a href="#stats">통계 창</a></li>
           <li><a href="#notifications">알림</a></li>
           <li><a href="#settings">설정</a></li>
@@ -153,18 +179,20 @@
         <section id="intro">
           <h2>소개</h2>
           <p>
-            SessionMeter는 Claude 구독 사용량(5시간 세션과 주간 한도)을 시스템 트레이 아이콘,
-            데스크톱 위젯, 통계 창으로 보여 주는 데스크톱 애플리케이션입니다. Tauri v2로 제작된
-            오픈소스(MIT) 프로그램입니다.
+            SessionMeter는 <b>Claude</b>와 <b>Antigravity(Gemini 구독)</b>의 사용량을 시스템 트레이
+            아이콘, 데스크톱 위젯, 통계 창으로 보여 주는 데스크톱 애플리케이션입니다. 로그인한
+            서비스마다 5시간·주간 등의 남은 사용량과 초기화까지 남은 시간을 한눈에 확인할 수 있습니다.
+            Tauri v2로 제작된 오픈소스(MIT) 프로그램입니다.
           </p>
           <div class="warn">
-            <b>비공식 도구이며 이용약관에 유의해야 합니다.</b> SessionMeter는 로그인된 본인 claude.ai
-            세션을 이용해 claude.ai 사용량 페이지와 동일한 데이터를 가져옵니다. 공식/공개 API가 아니며
-            Anthropic API 키를 사용하지 않습니다. Anthropic 소비자 약관은 봇·스크립트 등 자동 수단의
-            서비스 접근을 제한하므로 이 방식은 약관에 어긋날 수 있고 계정 제재 위험이 있습니다.
-            <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic 약관</a>을 확인하고
-            본인 책임으로 사용하십시오. 본 프로그램은 Anthropic과 무관하며 "Claude"는 Anthropic,
-            PBC의 상표입니다.
+            <b>비공식 도구이며 이용약관에 유의해야 합니다.</b> SessionMeter는 로그인된 본인 세션을
+            이용해 각 서비스의 사용량 페이지와 동일한 데이터를 가져옵니다. 공식/공개 API가 아니며
+            해당 서비스의 API 키를 사용하지 않습니다. 각 서비스의 약관은 봇·스크립트 등 자동 수단의
+            접근을 제한하므로 이 방식은 약관에 어긋날 수 있고 계정 제재 위험이 있습니다. 반드시
+            <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic 약관</a>과
+            <a href="https://policies.google.com/terms">Google 약관</a>을 확인하고 본인 책임으로
+            사용하십시오. 본 프로그램은 Anthropic·Google과 무관하며, "Claude"는 Anthropic, PBC의,
+            "Antigravity"·"Gemini"는 Google LLC의 상표입니다.
           </div>
         </section>
 
@@ -174,33 +202,41 @@
             릴리스 페이지에서 Windows 설치 프로그램(<code>SessionMeter_x.y.z_x64-setup.exe</code>)을
             내려받아 실행합니다. Windows 10/11에서 동작하며 WebView2 런타임이 필요합니다(최신
             Windows에는 기본 포함). 업데이트는 새 설치 프로그램을 실행하면 기존 설정과 로그인 세션이
-            유지된 채 덮어 설치됩니다.
+            유지된 채 덮어 설치됩니다. 앱 안에서 새 버전이 확인되면 위젯과 트레이 메뉴에 설치 버튼이
+            나타나며, 눌러서 바로 업데이트할 수 있습니다.
           </p>
-          <div class="shot">스크린샷: 설치 화면</div>
         </section>
 
         <section id="signin">
-          <h2>Claude 로그인</h2>
+          <h2>서비스 로그인</h2>
           <p>
-            처음 실행하면 설정 창과 로그인 창이 함께 열립니다. 이후에는 트레이 아이콘을 우클릭해
-            <b>설정</b>을 열고 계정 항목의 <b>Claude 로그인</b>을 누릅니다. 앱 안에서 claude.ai 로그인
-            창이 열리며, 로그인을 완료하면 세션이 자동으로 저장됩니다.
+            트레이 아이콘을 우클릭해 <b>설정</b>을 열면 계정 목록에서 서비스별로 로그인·로그아웃할 수
+            있습니다. 로그인한 서비스만 트레이 툴팁·위젯·통계에 나타납니다.
           </p>
+          <h3>Claude</h3>
           <p>
-            세션은 OS 애플리케이션 데이터 폴더의 사용자별 파일(<code>session.dat</code>)에 저장됩니다.
-            Windows에서는 이 파일이 DPAPI(사용자 범위)로 암호화되어 다른 사용자·오프라인 디스크·복사된
-            백업에서 복호화할 수 없습니다. 로그인되면 설정 계정 항목에 이름과 이메일이 표시되고
-            <b>로그아웃</b> 버튼으로 언제든 세션을 삭제할 수 있습니다.
+            앱 안에서 claude.ai 로그인 창이 열리며, 로그인을 완료하면 세션이 자동으로 저장됩니다.
+            세션은 OS 애플리케이션 데이터 폴더의 사용자별 파일에 저장되고, Windows에서는 DPAPI(사용자
+            범위)로 암호화되어 다른 사용자·오프라인 디스크·복사된 백업에서 복호화할 수 없습니다.
           </p>
-          <div class="shot">스크린샷: 로그인 창</div>
+          <h3>Antigravity (Gemini)</h3>
+          <p>
+            Antigravity 로그인은 <b>별도의 프로세스로 격리된 창</b>에서 진행됩니다. 이렇게 하면 Google
+            로그인 페이지에 문제가 있어도 앱 본체(트레이·위젯·다른 서비스)는 영향을 받지 않습니다.
+            창에서 본인 Google 계정으로 로그인하면 창이 자동으로 닫히고 사용량이 표시됩니다.
+          </p>
+          <div class="note">
+            Antigravity는 공식 API가 없어 gemini.google.com의 사용량 표시를 그대로 읽어오는 실험적
+            기능입니다. Google이 임베드 브라우저 로그인을 정책적으로 제한하므로, 로그인이 실패하거나
+            페이지 구조 변경으로 수치가 달라질 수 있습니다.
+          </div>
         </section>
 
         <section id="tray-icon">
           <h2>트레이 아이콘 읽는 법</h2>
           <p>
-            트레이 아이콘은 앱 아이콘으로 고정되며, 아이콘 위에 마우스를 올리면 계정명과 각 항목의 남은
-            사용량이 툴팁으로 표시됩니다. 툴팁의 남은 사용량은 색상 기준과 동일하게 다음과 같이
-            해석합니다.
+            트레이 아이콘 위에 마우스를 올리면 로그인한 각 서비스의 이름과 남은 사용량, 초기화까지
+            남은 시간이 툴팁으로 표시됩니다. 남은 사용량은 다음 색상 기준으로 해석합니다.
           </p>
           <table>
             <thead><tr><th>상태</th><th>의미(남은 사용량 기준)</th></tr></thead>
@@ -211,8 +247,8 @@
             </tbody>
           </table>
           <p>
-            위젯과 통계 창의 사용량 막대는 같은 색상 기준으로 표시됩니다. 설정에서 표시 기준(남은
-            사용량 / 사용량)을 바꿀 수 있습니다.
+            사용량은 설정한 갱신 주기마다 자동으로 갱신되며, 설정에서 표시 기준(남은 사용량 / 사용한
+            사용량)을 바꿀 수 있습니다.
           </p>
         </section>
 
@@ -223,54 +259,84 @@
             <tbody>
               <tr><td>좌클릭</td><td>위젯 표시 / 숨김</td></tr>
               <tr><td>더블클릭</td><td>통계 창 열기</td></tr>
-              <tr><td>우클릭</td><td>메뉴 열기(위젯, 통계, 설정, 종료)</td></tr>
+              <tr><td>우클릭</td><td>메뉴 열기</td></tr>
             </tbody>
           </table>
           <p>
-            메뉴는 앱 테마에 맞춰 다크/라이트로 표시됩니다. 사용량은 설정한 갱신 주기마다 자동으로
-            갱신되므로 별도의 수동 새로고침 항목은 없습니다.
+            우클릭 메뉴에는 위젯 표시/숨김 <b>토글 스위치</b>, <b>위젯 스타일</b>, <b>통계</b>,
+            <b>설정</b>, <b>종료</b>가 있습니다. 메뉴는 앱 테마에 맞춰 다크/라이트로 표시됩니다.
           </p>
         </section>
 
         <section id="widget">
           <h2>데스크톱 위젯</h2>
           <p>
-            위젯은 테두리가 없고 작업 표시줄에 나타나지 않는 떠 있는 창으로, 5시간·주간(그리고 있는
-            경우 추가) 항목의 남은 사용량과 초기화까지 남은 시간을 보여 줍니다. 표시 내용에 맞춰 창
-            높이가 자동으로 맞춰집니다.
+            위젯은 테두리가 없고 작업 표시줄에 나타나지 않는 떠 있는 창으로, 각 항목의 남은 사용량과
+            초기화까지 남은 시간을 보여 줍니다. 표시 내용에 맞춰 창 크기가 자동으로 맞춰지며, 로그인한
+            <b>서비스마다 독립된 위젯 창</b>이 뜨고 제목표시줄에 서비스 이름이 표시됩니다.
           </p>
+          <div class="render-inline"><div style="display:inline-flex;flex-direction:row;width:205.938px;height:202.922px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:column;gap:9px;width:177.938px;height:178.922px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:3px;width:177.938px;height:31.5px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:177.938px;height:19.5px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:47.5312px;height:18px;color:rgb(24, 24, 27);font-size:12px;font-weight:400;line-height:18px;text-align:start;">이번 세션</span> <span style="display:block;flex-direction:row;width:27.8594px;height:19.5px;color:rgb(217, 119, 87);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:19.5px;text-align:start;">62%</span></div> <div style="display:block;flex-direction:row;width:177.938px;height:9px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:110.312px;height:9px;border-radius:5px;background-image:linear-gradient(90deg, rgba(217, 119, 87, 0.85), rgb(217, 119, 87));color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(217, 119, 87, 0.4) 0px 0px 8px 0px;"></div></div></div> <div style="display:flex;flex-direction:column;gap:3px;width:177.938px;height:26.6875px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:177.938px;height:19.6875px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:44.3594px;height:16.7969px;color:rgb(90, 90, 100);font-size:11.2px;font-weight:400;line-height:16.8px;text-align:start;">주간 세션</span> <span style="display:block;flex-direction:row;width:28.125px;height:19.6875px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:19.68px;text-align:start;">39%</span></div> <div style="display:block;flex-direction:row;width:177.938px;height:4px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:69.3906px;height:4px;border-radius:5px;background-color:rgb(224, 164, 88);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"></div></div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div>
           <ul>
-            <li><b>통계·설정 바로가기</b>: 상단의 차트·톱니 아이콘으로 통계 창과 설정 창을 엽니다.</li>
-            <li><b>항상 위 고정</b>: 핀 아이콘을 눌러 켜고 끕니다. 켜면 다른 창 위에 항상 표시됩니다.</li>
-            <li><b>위치 잠금</b>: 자물쇠 아이콘을 눌러 켜고 끕니다. 잠그면 위젯을 드래그로 이동할 수
-              없습니다. 잠금 해제 상태에서는 위젯을 끌어 원하는 위치로 옮길 수 있으며, 옮긴 위치는
-              재부팅 후에도 복원됩니다.</li>
-            <li><b>투명도</b>: 설정의 위젯 투명도 슬라이더로 조절합니다.</li>
+            <li><b>통계·설정·스타일 바로가기</b>: 상단 아이콘으로 통계 창, 설정 창, 위젯 스타일 창을
+              엽니다. 폭이 좁으면 아이콘이 점 세 개 메뉴로 접힙니다.</li>
+            <li><b>항상 위 고정</b>: 핀 아이콘으로 켜고 끕니다. 켜면 다른 창 위에 항상 표시됩니다.</li>
+            <li><b>위치 잠금</b>: 자물쇠 아이콘으로 켜고 끕니다. 잠금 해제 상태에서 위젯을 끌어 원하는
+              위치로 옮길 수 있으며, 옮긴 위치는 재부팅 후에도 복원됩니다.</li>
+            <li><b>투명도</b>: 위젯 스타일 창의 투명도 슬라이더로 조절합니다.</li>
           </ul>
-          <img class="shot-img" src="assets/widget.png" alt="SessionMeter 데스크톱 위젯" width="260" />
+        </section>
+
+        <section id="widget-styles">
+          <h2>위젯 스타일</h2>
+          <p>
+            트레이 메뉴 또는 위젯 상단의 팔레트 아이콘으로 <b>위젯 스타일</b> 창을 엽니다. 다섯 가지
+            그래픽 컨셉을 각각 <b>상세</b>·<b>컴팩트</b> 두 형태로, 총 10종 중에서 <b>서비스별로</b>
+            선택합니다. 실시간 미리보기와 표시 토글(남은 사용량 / 사용한 사용량)을 제공합니다.
+          </p>
+          <p>
+            위젯의 두 지표 색상은 서비스에 맞춰 표시됩니다(예:
+            <span class="swatch" style="background:rgb(217,119,87)"></span>Claude 코럴,
+            <span class="swatch" style="background:rgb(66,133,244)"></span>Antigravity 블루). 아래
+            갤러리는 앱의 실제 위젯 컴포넌트를 그대로 렌더한 것으로(스크린샷 아님, Claude 색상 · 남은
+            사용량 표시 기준 · 예시 값), 확대해도 선명합니다.
+          </p>
+          <div class="style-gallery">
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:205.938px;height:202.922px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:column;gap:9px;width:177.938px;height:178.922px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:3px;width:177.938px;height:31.5px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:177.938px;height:19.5px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:47.5312px;height:18px;color:rgb(24, 24, 27);font-size:12px;font-weight:400;line-height:18px;text-align:start;">이번 세션</span> <span style="display:block;flex-direction:row;width:27.8594px;height:19.5px;color:rgb(217, 119, 87);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:19.5px;text-align:start;">62%</span></div> <div style="display:block;flex-direction:row;width:177.938px;height:9px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:110.312px;height:9px;border-radius:5px;background-image:linear-gradient(90deg, rgba(217, 119, 87, 0.85), rgb(217, 119, 87));color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(217, 119, 87, 0.4) 0px 0px 8px 0px;"></div></div></div> <div style="display:flex;flex-direction:column;gap:3px;width:177.938px;height:26.6875px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:177.938px;height:19.6875px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:44.3594px;height:16.7969px;color:rgb(90, 90, 100);font-size:11.2px;font-weight:400;line-height:16.8px;text-align:start;">주간 세션</span> <span style="display:block;flex-direction:row;width:28.125px;height:19.6875px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:19.68px;text-align:start;">39%</span></div> <div style="display:block;flex-direction:row;width:177.938px;height:4px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:69.3906px;height:4px;border-radius:5px;background-color:rgb(224, 164, 88);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"></div></div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div><figcaption><b>Focus &amp; Slim</b> · 상세</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:115.391px;height:85.7656px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:column;gap:4px;width:87.3906px;height:61.7656px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:87.3906px;height:19.5px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:47.5312px;height:18px;color:rgb(24, 24, 27);font-size:12px;font-weight:400;line-height:18px;text-align:start;">이번 세션</span> <span style="display:block;flex-direction:row;width:27.8594px;height:19.5px;color:rgb(217, 119, 87);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:19.5px;text-align:start;">62%</span></div> <div style="display:block;flex-direction:row;width:87.3906px;height:9px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:54.1719px;height:9px;border-radius:5px;background-image:linear-gradient(90deg, rgba(217, 119, 87, 0.85), rgb(217, 119, 87));color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(217, 119, 87, 0.4) 0px 0px 8px 0px;"></div></div> <div style="display:block;flex-direction:row;width:87.3906px;height:4px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:34.0781px;height:4px;border-radius:5px;background-color:rgb(224, 164, 88);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"></div></div> <div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:10px;width:87.3906px;height:17.2656px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:24.6875px;height:17.2656px;color:rgb(224, 164, 88);font-size:11.52px;font-weight:700;font-variant-numeric:tabular-nums;line-height:17.28px;text-align:start;">39%</span> <span style="display:block;flex-direction:row;width:48.1875px;height:15.3438px;color:rgb(90, 90, 100);font-size:10.24px;font-weight:400;font-variant-numeric:tabular-nums;line-height:15.36px;text-align:start;">2시간 14분</span></div></div></div></div><figcaption><b>Focus &amp; Slim</b> · 컴팩트</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:301.938px;height:126.734px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:12px;width:273.938px;height:102.734px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:84px;height:84px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 100" style="display:inline;flex-direction:row;width:84px;height:84px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><circle cx="50" cy="50" stroke-width="6" r="42" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></circle><circle cx="50" cy="50" stroke-width="6" transform="rotate(-90 50 50)" r="42" stroke-dasharray="263.89378290154264" stroke-dashoffset="160.975207569941" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></circle><circle cx="50" cy="50" stroke-width="8" r="30" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:8px;stroke-linecap:round;"></circle><circle cx="50" cy="50" stroke-width="8" transform="rotate(-90 50 50)" r="30" stroke-dasharray="188.49555921538757" stroke-dashoffset="71.62831250184728" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:8px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></circle></svg> <div style="display:grid;flex-direction:row;align-items:center;grid-template-columns:84px;position:absolute;width:84px;height:84px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:40.5625px;height:27.6094px;color:rgb(24, 24, 27);font-size:18.4px;font-weight:800;font-variant-numeric:tabular-nums;line-height:27.6px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">62%</span></div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div><figcaption><b>Concentric Rings</b> · 상세</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:133.328px;height:78px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:9px;width:105.328px;height:54px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:54px;height:54px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 100" style="display:inline;flex-direction:row;width:54px;height:54px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><circle cx="50" cy="50" stroke-width="6" r="42" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></circle><circle cx="50" cy="50" stroke-width="6" transform="rotate(-90 50 50)" r="42" stroke-dasharray="263.89378290154264" stroke-dashoffset="160.975207569941" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></circle><circle cx="50" cy="50" stroke-width="8" r="30" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:8px;stroke-linecap:round;"></circle><circle cx="50" cy="50" stroke-width="8" transform="rotate(-90 50 50)" r="30" stroke-dasharray="188.49555921538757" stroke-dashoffset="71.62831250184728" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:8px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></circle></svg> <div style="display:grid;flex-direction:row;align-items:center;grid-template-columns:54px;position:absolute;width:54px;height:54px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:49.6875px;height:15.8438px;color:rgb(24, 24, 27);font-size:10.56px;font-weight:400;font-variant-numeric:tabular-nums;line-height:15.84px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:42.3281px;height:34.3281px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:42.3281px;height:19.2031px;color:rgb(217, 119, 87);font-size:19.2px;font-weight:800;font-variant-numeric:tabular-nums;line-height:19.2px;text-align:start;">62%</span> <span style="display:block;flex-direction:row;width:28.125px;height:13.125px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:13.12px;text-align:start;">39%</span></div></div></div></div><figcaption><b>Concentric Rings</b> · 컴팩트</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:329.938px;height:126.734px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:12px;width:301.938px;height:102.734px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:112px;height:64px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 56" style="display:inline;flex-direction:row;width:112px;height:64px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><path d="M5 50 A45 45 0 0 1 95 50" stroke-width="6" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path d="M5 50 A45 45 0 0 1 95 50" stroke-width="6" stroke-dasharray="141.3716694115407" stroke-dashoffset="53.72123437638547" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:6px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></path><path d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" stroke-dasharray="103.67255756846318" stroke-dashoffset="63.240260116762535" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></path></svg> <div style="display:block;flex-direction:row;position:absolute;top:46.7344px;left:56px;right:0.578125px;inset:46.7344px 0.578125px 0px 56px;width:55.4219px;height:17.2656px;color:rgb(24, 24, 27);font-size:11.52px;font-weight:700;font-variant-numeric:tabular-nums;line-height:17.28px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">2시간 14분</div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div><figcaption><b>Dual Semi-Arc</b> · 상세</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:153.328px;height:66px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:9px;width:125.328px;height:42px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:74px;height:42px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 56" style="display:inline;flex-direction:row;width:74px;height:42px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><path d="M5 50 A45 45 0 0 1 95 50" stroke-width="6" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path d="M5 50 A45 45 0 0 1 95 50" stroke-width="6" stroke-dasharray="141.3716694115407" stroke-dashoffset="53.72123437638547" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:6px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></path><path d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" stroke-dasharray="103.67255756846318" stroke-dashoffset="63.240260116762535" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></path></svg> <div style="display:block;flex-direction:row;position:absolute;top:27.6094px;left:37px;right:-9.1875px;inset:27.6094px -9.1875px 0px 37px;width:46.1875px;height:14.3906px;color:rgb(24, 24, 27);font-size:9.6px;font-weight:700;font-variant-numeric:tabular-nums;line-height:14.4px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">2시간 14분</div></div> <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:42.3281px;height:34.3281px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:42.3281px;height:19.2031px;color:rgb(217, 119, 87);font-size:19.2px;font-weight:800;font-variant-numeric:tabular-nums;line-height:19.2px;text-align:start;">62%</span> <span style="display:block;flex-direction:row;width:28.125px;height:13.125px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:13.12px;text-align:start;">39%</span></div></div></div></div><figcaption><b>Dual Semi-Arc</b> · 컴팩트</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:248.938px;height:126.734px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:12px;width:220.938px;height:102.734px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:flex-end;gap:8px;width:31px;height:82px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:14px;height:82px;border-radius:7px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;position:absolute;top:31.1719px;inset:31.1719px 0px 0px;width:14px;height:50.8281px;border-radius:7px;background-image:linear-gradient(to top, rgba(217, 119, 87, 0.8), rgb(217, 119, 87));color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(217, 119, 87, 0.4) 0px 0px 8px 0px;"></div></div> <div style="display:block;flex-direction:row;position:relative;width:9px;height:82px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;position:absolute;top:50.0312px;inset:50.0312px 0px 0px;width:9px;height:31.9688px;border-radius:5px;background-color:rgb(224, 164, 88);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"></div></div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div><figcaption><b>Vertical Pillars</b> · 상세</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:104.688px;height:76.4219px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:9px;width:76.6875px;height:52.4219px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:flex-end;gap:5px;width:21px;height:50px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:10px;height:50px;border-radius:7px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;position:absolute;top:19px;inset:19px 0px 0px;width:10px;height:31px;border-radius:7px;background-image:linear-gradient(to top, rgba(217, 119, 87, 0.8), rgb(217, 119, 87));color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(217, 119, 87, 0.4) 0px 0px 8px 0px;"></div></div> <div style="display:block;flex-direction:row;position:relative;width:6px;height:50px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;position:absolute;top:30.5px;inset:30.5px 0px 0px;width:6px;height:19.5px;border-radius:5px;background-color:rgb(224, 164, 88);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"></div></div></div> <div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;width:46.6875px;height:52.4219px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:42.3281px;height:21.1094px;color:rgb(217, 119, 87);font-size:19.2px;font-weight:800;font-variant-numeric:tabular-nums;line-height:21.12px;text-align:start;">62%</span> <span style="display:block;flex-direction:row;width:28.125px;height:14.4375px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:14.432px;text-align:start;">39%</span> <span style="display:block;flex-direction:row;width:46.6875px;height:14.875px;color:rgb(90, 90, 100);font-size:9.92px;font-weight:400;font-variant-numeric:tabular-nums;line-height:14.88px;text-align:start;">2시간 14분</span></div></div></div></div><figcaption><b>Vertical Pillars</b> · 컴팩트</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:301.938px;height:126.734px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:12px;width:273.938px;height:102.734px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:84px;height:84px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 100" style="display:inline;flex-direction:row;width:84px;height:84px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" stroke-dasharray="240" stroke-dashoffset="91.19999999999999" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:6px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" stroke-dasharray="180" stroke-dashoffset="109.8" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></path></svg> <div style="display:grid;flex-direction:row;align-items:center;grid-template-columns:84px;position:absolute;width:84px;height:84px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:38.7969px;height:26.3906px;color:rgb(24, 24, 27);font-size:17.6px;font-weight:800;font-variant-numeric:tabular-nums;line-height:26.4px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">62%</span></div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div><figcaption><b>Hexagonal Rings</b> · 상세</figcaption></figure>
+            <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:133.562px;height:80px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:9px;width:105.562px;height:56px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:56px;height:56px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 100" style="display:inline;flex-direction:row;width:56px;height:56px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" stroke-dasharray="240" stroke-dashoffset="91.19999999999999" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:6px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" stroke-dasharray="180" stroke-dashoffset="109.8" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></path></svg> <div style="display:grid;flex-direction:row;align-items:center;grid-template-columns:56px;position:absolute;width:56px;height:56px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:46.6875px;height:14.875px;color:rgb(24, 24, 27);font-size:9.92px;font-weight:400;font-variant-numeric:tabular-nums;line-height:14.88px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:40.5625px;height:33.5312px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:40.5625px;height:18.4062px;color:rgb(217, 119, 87);font-size:18.4px;font-weight:800;font-variant-numeric:tabular-nums;line-height:18.4px;text-align:start;">62%</span> <span style="display:block;flex-direction:row;width:28.125px;height:13.125px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:13.12px;text-align:start;">39%</span></div></div></div></div><figcaption><b>Hexagonal Rings</b> · 컴팩트</figcaption></figure>
+          </div>
         </section>
 
         <section id="stats">
           <h2>통계 창</h2>
-          <p>트레이 아이콘을 더블클릭하면 통계 창이 열립니다. 다음을 제공합니다.</p>
+          <p>
+            트레이 아이콘을 더블클릭하면 통계 창이 열립니다. 로그인한 서비스가 여러 개면 상단
+            <b>탭</b>으로 구분됩니다. 각 탭에서 다음을 제공합니다.
+          </p>
           <ul>
             <li>모든 사용 항목의 남은 사용량, 사용률, 초기화까지 남은 시간</li>
-            <li>최근 사용 추세 그래프(24시간 / 7일 전환)</li>
+            <li>최근 사용 추세 그래프(24시간 / 7일 / 1개월 전환)</li>
             <li>현재 속도 기준 소진 예측</li>
             <li>항목별 초기화 시각 일정</li>
           </ul>
-          <img class="shot-img" src="assets/stats.png" alt="SessionMeter 통계 창" />
         </section>
 
         <section id="notifications">
           <h2>알림</h2>
           <p>
-            사용량이 80% 및 95%에 도달하거나 세션이 초기화될 때 데스크톱 알림을 보냅니다. 설정에서
-            알림 사용 여부와 초기화 알림을 켜고 끌 수 있습니다.
+            사용량이 설정한 기준(기본 80%·95%)에 도달하거나 세션이 초기화될 때 데스크톱 알림을 보냅니다.
+            설정에서 이번 세션·주간 세션 각각의 기준과 초기화 알림을 켜고 끌 수 있습니다.
           </p>
           <div class="note">
-            설치본에서는 알림 발신 주체가 SessionMeter로 표시됩니다. 개발 모드(<code>tauri dev</code>)
-            에서는 Windows 특성상 발신 주체가 다르게 보일 수 있습니다.
+            설치본에서는 알림 발신 주체가 SessionMeter로 표시됩니다. 개발 모드에서는 Windows 특성상
+            발신 주체가 다르게 보일 수 있습니다.
           </div>
         </section>
 
@@ -282,19 +348,24 @@
             <li><b>언어</b>: 자동(OS 언어) / 한국어 / English.</li>
             <li><b>갱신 주기</b>: 1 / 5 / 10 / 15 / 30분.</li>
             <li><b>시작 시 실행</b>: 로그인 시 자동 실행 등록.</li>
-            <li><b>트레이 표시</b>, <b>위젯 투명도</b>, <b>알림</b>.</li>
-            <li><b>계정</b>: 로그인 시 이름·이메일과 로그아웃 버튼, 미로그인 시 로그인 버튼.</li>
+            <li><b>알림</b>: 사용량 기준·초기화 알림.</li>
+            <li><b>계정</b>: 서비스별 로그인 상태(이름·이메일)와 로그인/로그아웃 버튼.</li>
           </ul>
+          <p>
+            위젯 관련 설정(스타일, 표시 기준, 투명도, 항상 위, 이동 잠금)은 <b>위젯 스타일</b> 창에서
+            서비스별로 관리합니다.
+          </p>
         </section>
 
         <section id="troubleshooting">
           <h2>문제 해결</h2>
           <ul>
-            <li><b>사용량이 표시되지 않음</b>: 설정에서 로그인 상태를 확인하고, 필요하면 다시
-              로그인합니다.</li>
-            <li><b>세션 만료</b>: claude.ai 세션이 만료되면 다시 로그인해야 합니다.</li>
-            <li><b>로그인 창이 비어 있음</b>: 잠시 기다려 페이지가 로드되게 하거나 창을 닫고 다시
-              로그인합니다. 로드가 지연되면 자동으로 정리됩니다.</li>
+            <li><b>사용량이 표시되지 않음</b>: 설정에서 해당 서비스의 로그인 상태를 확인하고, 필요하면
+              다시 로그인합니다.</li>
+            <li><b>세션 만료</b>: 서비스 세션이 만료되면 다시 로그인해야 합니다.</li>
+            <li><b>Antigravity 로그인 화면이 뜨지 않거나 "안전하지 않은 브라우저" 안내가 나옴</b>:
+              Google이 임베드 로그인을 제한하는 경우입니다. 창을 닫고 잠시 후 다시 시도합니다. 로그인
+              창은 별도 프로세스라 실패해도 앱 본체는 계속 동작합니다.</li>
             <li><b>트레이 아이콘이 보이지 않음</b>: Windows 작업 표시줄의 숨겨진 아이콘 영역(^)을
               확인합니다.</li>
             <li><b>수치가 갱신되지 않음</b>: 설정의 갱신 주기를 확인합니다. 갱신은 주기마다 자동으로
@@ -309,19 +380,20 @@
             Font License 1.1을 따릅니다.
           </p>
           <p>
-            SessionMeter는 claude.ai의 비공식 엔드포인트를 사용하므로 언제든 동작이 바뀔 수 있습니다.
-            본인 계정의 세션으로만 동작하며,
-            <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic의 이용약관</a>을 확인한
-            뒤 본인 책임으로 사용하십시오. 본 프로그램은 Anthropic과 제휴·후원·보증 관계가 없으며,
-            "Claude"와 "Anthropic"은 Anthropic, PBC의 상표로 호환 대상을 설명하기 위해서만
-            사용되었습니다.
+            SessionMeter는 claude.ai·gemini.google.com의 비공식 엔드포인트를 사용하므로 언제든 동작이
+            바뀔 수 있습니다. 본인 계정의 세션으로만 동작하며,
+            <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic 약관</a>과
+            <a href="https://policies.google.com/terms">Google 약관</a>을 확인한 뒤 본인 책임으로
+            사용하십시오. 본 프로그램은 Anthropic·Google과 제휴·후원·보증 관계가 없으며, "Claude"·
+            "Anthropic"은 Anthropic, PBC의, "Antigravity"·"Gemini"는 Google LLC의 상표로 호환 대상을
+            설명하기 위해서만 사용되었습니다.
           </p>
         </section>
       </main>
     </div>
 
     <footer>
-      <p>SessionMeter · MIT License · Anthropic과 무관</p>
+      <p>SessionMeter · MIT License · Anthropic·Google과 무관</p>
     </footer>
   </body>
 </html>
