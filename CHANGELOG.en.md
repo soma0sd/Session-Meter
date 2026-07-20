@@ -49,6 +49,10 @@ All notable changes to this project are documented here. The format is based on
 - **Fixed the statistics window sometimes not showing other services' tabs**: the signed-in
   service list is re-read when the window gains focus, so a tab missed due to startup timing
   (e.g. Gemini) now appears.
+- **Fixed settings (widget style, refresh interval) resetting after an update**: a pre-0.4
+  settings file is now rewritten to the current format on first launch instead of being
+  re-derived every launch, and the settings/widget-style windows re-read the latest settings on
+  focus so a change in one window can't be reverted by a stale save in another.
 
 ## [0.3] - 2026-07-19
 

@@ -82,11 +82,15 @@
       unlisteners.push(
         await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
       );
-      // Re-check the signed-in state whenever the settings window regains focus, so the
-      // account panel is correct after signing in/out from elsewhere.
+      // Re-read settings + signed-in state whenever the window regains focus, so it starts from
+      // the latest saved values and a change here can't clobber one made in another window (e.g.
+      // the widget style window) that this window had not yet picked up.
       unlisteners.push(
         await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-          if (focused) void refreshServices();
+          if (focused) {
+            void refreshSettings();
+            void refreshServices();
+          }
         }),
       );
     } catch {
@@ -138,6 +142,16 @@
   async function refreshServices() {
     try {
       services = await getServicesStatus();
+    } catch {
+      /* preview */
+    }
+  }
+
+  // Re-read the persisted settings (on focus) so this window never saves a stale snapshot that
+  // would revert a change made elsewhere. Safe because every control here saves on change.
+  async function refreshSettings() {
+    try {
+      s = await getSettings();
     } catch {
       /* preview */
     }

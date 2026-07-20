@@ -174,13 +174,22 @@ pub fn load(app: &AppHandle) -> Settings {
     // Current format is the flat Settings object; also accept (and migrate the widget
     // position out of) the legacy shape { "settings": {..}, "widget_pos": {..} }.
     let legacy = v.get("settings").filter(|x| x.is_object()).cloned();
-    if legacy.is_some() {
+    let was_legacy = legacy.is_some();
+    if was_legacy {
         migrate_widget_pos(app, &dir, &v);
     }
     let source = legacy.unwrap_or(v);
     match serde_json::from_value::<Settings>(source.clone()) {
         Ok(mut s) => {
-            migrate_widgets(&mut s, &source);
+            let seeded = migrate_widgets(&mut s, &source);
+            // Rewrite the file once when it was a pre-0.4 shape (nested settings, or flat widget
+            // fields with no `widgets` map): otherwise the widget config is re-derived from the
+            // legacy fields on every launch/update instead of being saved, so a user's later
+            // style/interval change (or a stale multi-window save) appears to reset. Persisting
+            // the upgraded settings locks the current format in.
+            if was_legacy || seeded {
+                let _ = save(app, &s);
+            }
             s
         }
         Err(_) => {
@@ -194,9 +203,9 @@ pub fn load(app: &AppHandle) -> Settings {
 
 /// One-time upgrade: seed the Claude widget config from the pre-0.4 flat widget fields (or
 /// defaults) so the widget keeps its style/opacity/visibility across the multi-service update.
-fn migrate_widgets(settings: &mut Settings, source: &serde_json::Value) {
+fn migrate_widgets(settings: &mut Settings, source: &serde_json::Value) -> bool {
     if !settings.widgets.is_empty() {
-        return;
+        return false;
     }
     let mut wc = WidgetConfig::default();
     if let Some(x) = source.get("widget_style").and_then(|x| x.as_str()) {
@@ -225,6 +234,7 @@ fn migrate_widgets(settings: &mut Settings, source: &serde_json::Value) {
         wc.visible = x;
     }
     settings.widgets.insert("claude".to_string(), wc);
+    true
 }
 
 fn backup_corrupt(path: &Path, dir: &Path) {
@@ -452,6 +462,55 @@ mod dpapi {
             CryptUnprotectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out).ok()?;
             Some(take_out(out))
         }
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    // A real pre-0.4 (0.3.x) settings.json: flat widget fields, NO `widgets` map.
+    const LEGACY: &str = r#"{
+      "theme":"system","language":"auto","widget_opacity":0.7,"refresh_interval_min":5,
+      "always_on_top":true,"move_lock":false,"tray_display":"remaining","widget_layout":"compact",
+      "widget_visible":true,
+      "notify":{"enabled":true,"session_threshold":80,"weekly_threshold":80,"on_reset":true},
+      "history_retention_days":30,"org_name":"n","account_email":"e"
+    }"#;
+
+    // Mimics config::load's parse + migrate (without the AppHandle-bound file IO).
+    fn parse_and_migrate(s: &str) -> Settings {
+        let v: serde_json::Value = serde_json::from_str(s).expect("valid json");
+        let mut set: Settings = serde_json::from_value(v.clone()).expect("parses as Settings");
+        migrate_widgets(&mut set, &v);
+        set
+    }
+
+    #[test]
+    fn legacy_seeds_widget_and_keeps_interval() {
+        let s = parse_and_migrate(LEGACY);
+        assert_eq!(s.refresh_interval_min, 5, "interval kept from legacy");
+        let w = s.widgets.get("claude").expect("claude widget seeded");
+        assert_eq!(w.style, "focus-slim-compact", "widget_layout=compact -> focus-slim-compact");
+        assert!((w.opacity - 0.7).abs() < 1e-9, "opacity carried from legacy");
+    }
+
+    #[test]
+    fn user_change_round_trips() {
+        // Load legacy, apply a user change, save (serialize), reload.
+        let mut s = parse_and_migrate(LEGACY);
+        let mut w = s.widget("claude");
+        w.style = "hex-rings-detailed".to_string();
+        s.widgets.insert("claude".to_string(), w);
+        s.refresh_interval_min = 1;
+        let bytes = serde_json::to_vec_pretty(&s).unwrap();
+        let s2 = parse_and_migrate(std::str::from_utf8(&bytes).unwrap());
+        assert_eq!(s2.refresh_interval_min, 1, "interval must persist across save/load");
+        assert_eq!(
+            s2.widgets.get("claude").unwrap().style,
+            "hex-rings-detailed",
+            "style must persist across save/load"
+        );
     }
 }
 

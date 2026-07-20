@@ -81,6 +81,16 @@
     }
   }
 
+  // Re-read persisted settings on focus so a change here never saves a stale snapshot that would
+  // revert a change made in another window. Safe: every control saves on change.
+  async function refreshSettings() {
+    try {
+      s = await getSettings();
+    } catch {
+      /* preview */
+    }
+  }
+
   onMount(async () => {
     await initWindow();
     try {
@@ -102,7 +112,10 @@
       );
       unlisteners.push(
         await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-          if (focused) void refreshServices();
+          if (focused) {
+            void refreshSettings();
+            void refreshServices();
+          }
         }),
       );
     } catch {
