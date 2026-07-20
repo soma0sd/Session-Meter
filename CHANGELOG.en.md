@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
-## [0.4] - 2026-07-19
+## [0.4] - 2026-07-20
 
 ### Added
 
@@ -21,13 +21,22 @@ All notable changes to this project are documented here. The format is based on
   its own tab.
 - **Separate dev build**: running a development build uses a distinct identifier (`-dev`) so it
   runs alongside the installed release without conflicting.
+- **Service icon in widget titles**: each widget title now shows a brand-coloured service icon so
+  the service is identifiable at a glance.
 
 ### Changed
 
 - Widget settings moved from the settings window into the new **Widget style** window; the old
   detailed/compact toggle is replaced by the 10-style picker.
 - The settings account section is now a **per-service sign-in/out list**.
-- The tray menu's widget show/hide row is now an on/off toggle switch.
+- The tray menu's widget show/hide row is removed; each service's widget is now shown or hidden
+  individually from the **Widget style** window.
+- The compact widget styles show the time remaining in a clock format (`H:MM` / `M:SS`).
+- The app checks for updates on startup and **every 10 minutes** (previously startup only).
+- Renamed the **Antigravity** service to **Gemini** (display name and internal id); existing
+  session, settings, widget position, and history are migrated automatically.
+- The settings account list now shows each service's **account and subscription plan** together;
+  Gemini's Google account email is captured best-effort on sign-in.
 
 ### Fixed
 
@@ -35,6 +44,11 @@ All notable changes to this project are documented here. The format is based on
   before the auto-update restart, so widgets return to where you left them.
 - **The tray menu's Quit item was sometimes clipped off-screen**: the menu window now sizes to
   its content.
+- **Stabilized update delivery**: releases are published as a tagged prerelease instead of a
+  draft, preventing the update installer URL from detaching from the version tag and 404-ing.
+- **Fixed the statistics window sometimes not showing other services' tabs**: the signed-in
+  service list is re-read when the window gains focus, so a tab missed due to startup timing
+  (e.g. Gemini) now appears.
 
 ## [0.3] - 2026-07-19
 

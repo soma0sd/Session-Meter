@@ -93,6 +93,8 @@ export interface ServiceStatus {
   logged_in: boolean;
   org_name: string;
   email: string;
+  /** Plan / subscription (e.g. "Claude Max 20x", "Gemini Pro"). */
+  subscription: string;
 }
 
 export interface UpdateInfo {
@@ -120,14 +122,14 @@ function mockUsage(service?: string): UsageSnapshot {
     utilization: 100 - remaining,
     resets_at: iso(resetMs),
   });
-  if (service === "antigravity") {
+  if (service === "gemini") {
     const buckets = [
       b("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", 100, 6 * 3600_000),
       b("gemini-3-flash-preview", "Gemini 3 Flash Preview", 74, 6 * 3600_000),
       b("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite", 92, 6 * 3600_000),
     ];
     return {
-      service_id: "antigravity",
+      service_id: "gemini",
       five_hour: { remaining: 100, utilization: 0, resets_at: buckets[0].resets_at },
       weekly_primary: { remaining: 74, utilization: 26, resets_at: buckets[1].resets_at },
       primary_key: "gemini-3.1-pro-preview",
@@ -217,8 +219,8 @@ export const getSessionStatus = (service?: string) =>
   }));
 export const getServicesStatus = () =>
   call<ServiceStatus[]>("get_services_status", undefined, () => [
-    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com" },
-    { id: "antigravity", name: "Antigravity", logged_in: true, org_name: "you@example.com", email: "you@example.com" },
+    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Max 20x" },
+    { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@gmail.com", subscription: "Gemini Pro" },
   ]);
 export const openLoginWindow = (service?: string) =>
   call<void>("open_login_window", { service }, () => undefined);
@@ -243,6 +245,8 @@ export const setMoveLock = (service: string, locked: boolean) =>
   call<void>("set_move_lock", { service, locked }, () => undefined);
 export const setWidgetOpacity = (service: string, alpha: number) =>
   call<void>("set_widget_opacity", { service, alpha }, () => undefined);
+export const setWidgetVisible = (service: string, visible: boolean) =>
+  call<void>("set_widget_visible", { service, visible }, () => undefined);
 
 // --- system ---
 export const setAutostart = (enabled: boolean) =>

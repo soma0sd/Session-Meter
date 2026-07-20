@@ -24,6 +24,19 @@ export function formatCountdown(ms: number, locale: "ko" | "en" = "en"): string 
   return `${m}m ${s}s`;
 }
 
+// Clock-style remaining time for the compact widget infographics: "H:MM" when an hour or more
+// remains, otherwise "M:SS" (minutes:seconds). Zero-padded and locale-independent. Days roll into
+// the hour count (compact widgets only show the short primary window, so the value stays small).
+export function formatClock(ms: number): string {
+  if (!Number.isFinite(ms)) return "-";
+  const totalSec = Math.floor(Math.max(0, ms) / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}` : `${m}:${pad(s)}`;
+}
+
 /**
  * Format a reset timestamp as a friendly date + time. Same-day resets read "Today HH:MM",
  * next-day "Tomorrow HH:MM"; anything further out shows the month + day + time.

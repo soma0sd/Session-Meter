@@ -90,7 +90,7 @@ pub struct Settings {
     pub theme: String,    // light | dark | system
     pub language: String, // auto | ko | en
     pub refresh_interval_min: u64,
-    /// Per-service widget config, keyed by service id ("claude", "antigravity", ...).
+    /// Per-service widget config, keyed by service id ("claude", "gemini", ...).
     pub widgets: HashMap<String, WidgetConfig>,
     pub notify: NotifySettings,
     pub history_retention_days: u32,
@@ -278,6 +278,68 @@ pub fn save_widget_pos(app: &AppHandle, service: &str, x: i32, y: i32) {
     }
     v[service] = serde_json::json!({ "x": x, "y": y });
     let _ = write_json_atomic(&path, &v);
+}
+
+// --- one-time service rename migration (Antigravity -> Gemini, 0.4.1) ---
+
+/// Carry an upgrading user's Antigravity data over to the new `gemini` service id so they keep
+/// their session, history, widget position, and widget settings after the rename. Each step is
+/// idempotent (acts only when the old artifact exists and the new one does not / is absent), so
+/// running it on every startup is safe. Call before settings/window state are loaded.
+pub fn migrate_service_rename(app: &AppHandle) {
+    let Some(dir) = data_dir(app) else {
+        return;
+    };
+    // Session credential + usage history: plain per-service file renames.
+    rename_if_needed(
+        &dir.join("session.antigravity.dat"),
+        &dir.join("session.gemini.dat"),
+    );
+    rename_if_needed(
+        &dir.join("history.antigravity.jsonl"),
+        &dir.join("history.gemini.jsonl"),
+    );
+    // Widget position: top-level service key inside window.json.
+    let wpath = dir.join(WINDOW_FILE);
+    if let Some(mut v) = read_json_file::<serde_json::Value>(&wpath) {
+        let changed = v
+            .as_object_mut()
+            .map(|o| move_map_key(o, "antigravity", "gemini"))
+            .unwrap_or(false);
+        if changed {
+            let _ = write_json_atomic(&wpath, &v);
+        }
+    }
+    // Widget settings: widgets.antigravity -> widgets.gemini inside settings.json.
+    let spath = dir.join(SETTINGS_FILE);
+    if let Some(mut v) = read_json_file::<serde_json::Value>(&spath) {
+        let changed = v
+            .get_mut("widgets")
+            .and_then(|w| w.as_object_mut())
+            .map(|w| move_map_key(w, "antigravity", "gemini"))
+            .unwrap_or(false);
+        if changed {
+            let _ = write_json_atomic(&spath, &v);
+        }
+    }
+}
+
+fn rename_if_needed(from: &Path, to: &Path) {
+    if from.exists() && !to.exists() {
+        let _ = fs::rename(from, to);
+    }
+}
+
+/// Move the value under `old` to `new` in a JSON object, only when `old` is present and `new`
+/// is not. Returns whether anything changed.
+fn move_map_key(obj: &mut serde_json::Map<String, serde_json::Value>, old: &str, new: &str) -> bool {
+    if obj.contains_key(old) && !obj.contains_key(new) {
+        if let Some(val) = obj.remove(old) {
+            obj.insert(new.to_string(), val);
+            return true;
+        }
+    }
+    false
 }
 
 // --- session credential (per service; user-scoped file; DPAPI-encrypted on Windows) ---

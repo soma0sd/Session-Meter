@@ -13,6 +13,7 @@
     setSettings,
     getUsage,
     getServicesStatus,
+    setWidgetVisible,
     widgetConfig,
     type Settings,
     type UsageSnapshot,
@@ -130,6 +131,14 @@
     s.widgets = { ...s.widgets, [service]: { ...cur, ...patch } };
     void save();
   }
+
+  // Visibility has a live-window side-effect, so it goes through its own command (not the plain
+  // settings save): the command persists it, shows/hides the widget window, and broadcasts
+  // settings. Update local state optimistically so the checkbox flips immediately.
+  function setWidgetVisibility(service: string, visible: boolean) {
+    if (s) s.widgets = { ...s.widgets, [service]: { ...widgetConfig(s, service), visible } };
+    void setWidgetVisible(service, visible);
+  }
 </script>
 
 <div class="win">
@@ -211,6 +220,14 @@
               oninput={(e) => updateWidget(svc.id, { opacity: Number((e.target as HTMLInputElement).value) })} />
             <span class="fval">{Math.round(wc.opacity * 100)}%</span>
           </div>
+
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={wc.visible}
+              onchange={(e) => setWidgetVisibility(svc.id, (e.target as HTMLInputElement).checked)} />
+            <span>{$t("widgetStyle.showWidget")}</span>
+          </label>
 
           <label class="check">
             <input

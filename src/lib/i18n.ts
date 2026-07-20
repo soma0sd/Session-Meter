@@ -28,7 +28,6 @@ const en: Dict = {
   "bucket.current": "Current usage",
   "bucket.weekly": "Weekly limit",
 
-  "menu.widget": "Show / hide widget",
   "menu.style": "Widget style",
   "menu.stats": "Statistics",
   "menu.settings": "Settings",
@@ -44,6 +43,7 @@ const en: Dict = {
   "widgetStyle.showRemaining": "Remaining",
   "widgetStyle.showUsed": "Used",
   "widgetStyle.opacity": "Opacity",
+  "widgetStyle.showWidget": "Show widget",
   "widgetStyle.pickStyle": "Style",
   "widgetStyle.preview": "Preview",
   "widgetStyle.usage": "Usage",
@@ -142,7 +142,6 @@ const ko: Dict = {
   "bucket.current": "현재 사용량",
   "bucket.weekly": "주간 한도",
 
-  "menu.widget": "위젯 표시 / 숨김",
   "menu.style": "위젯 스타일",
   "menu.stats": "통계",
   "menu.settings": "설정",
@@ -158,6 +157,7 @@ const ko: Dict = {
   "widgetStyle.showRemaining": "남은 사용량",
   "widgetStyle.showUsed": "사용한 사용량",
   "widgetStyle.opacity": "투명도",
+  "widgetStyle.showWidget": "위젯 표시",
   "widgetStyle.pickStyle": "스타일",
   "widgetStyle.preview": "미리보기",
   "widgetStyle.usage": "사용량",

@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { locale } from "../i18n";
-  import { formatCountdown } from "../countdown";
+  import { formatClock } from "../countdown";
   import { shownPct, type WidgetStyleProps } from "./types";
   import InfoGrid from "./InfoGrid.svelte";
 
@@ -37,7 +36,7 @@
     </svg>
     <div class="center">
       {#if variant === "compact"}
-        <span class="ctime">{formatCountdown(primaryResetMs, $locale)}</span>
+        <span class="ctime">{formatClock(primaryResetMs)}</span>
       {:else}
         <span class="cpct">{pShown}%</span>
       {/if}

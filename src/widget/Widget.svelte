@@ -31,7 +31,15 @@
 
   const SERVICE_NAMES: Record<string, string> = {
     claude: "Claude",
-    antigravity: "Antigravity",
+    gemini: "Gemini",
+  };
+
+  // Small brand marks shown before the service name in the widget title, tinted with the
+  // service's metric colour (--m1). Distinct silhouettes: Claude a radial spark, Gemini a
+  // four-point sparkle.
+  const SERVICE_ICONS: Record<string, string> = {
+    claude: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1.7v12.6M1.7 8h12.6M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`,
+    gemini: `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 1.5Q8 8 14.5 8Q8 8 8 14.5Q8 8 1.5 8Q8 8 8 1.5Z"/></svg>`,
   };
 
   // Which service this widget window monitors, derived from its window label
@@ -251,7 +259,10 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="panel" bind:this={panelEl} onmousedown={startDrag}>
   <header>
-    <span class="title">{serviceName}</span>
+    <span class="title">
+      {#if SERVICE_ICONS[myService]}<span class="svc-icon">{@html SERVICE_ICONS[myService]}</span>{/if}
+      <span>{serviceName}</span>
+    </span>
     {#if collapsed}
       <button
         class="kebab"
@@ -342,11 +353,19 @@
     white-space: nowrap;
   }
   .title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font-size: 0.74rem;
     font-weight: 700;
     letter-spacing: 0.02em;
     color: rgb(var(--fg-muted));
     white-space: nowrap;
+  }
+  .svc-icon {
+    display: inline-flex;
+    /* Tinted with the service's brand colour, set on <html> in onMount. */
+    color: rgb(var(--m1));
   }
   .kebab {
     display: grid;

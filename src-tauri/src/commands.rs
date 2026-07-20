@@ -27,6 +27,8 @@ pub struct ServiceStatus {
     pub logged_in: bool,
     pub org_name: String,
     pub email: String,
+    /// Plan / subscription (e.g. "Claude Max 20x", "Gemini Pro"), from the last usage snapshot.
+    pub subscription: String,
 }
 
 #[tauri::command]
@@ -193,18 +195,38 @@ pub fn get_session_status(
 /// Login status + identity for every known service (logged-in or not).
 #[tauri::command]
 pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<ServiceStatus> {
+    // Snapshot each service's identity + plan, then drop the lock before touching settings.
+    let snap_info: std::collections::HashMap<String, (String, String, String)> = {
+        let snaps = state.last_snapshot.lock().unwrap();
+        snaps
+            .iter()
+            .map(|(k, s)| {
+                (
+                    k.clone(),
+                    (
+                        s.organization_name.clone(),
+                        s.account_email.clone(),
+                        s.subscription.clone(),
+                    ),
+                )
+            })
+            .collect()
+    };
     crate::service::all()
         .iter()
         .map(|&id| {
             let logged_in = crate::service::has_session(&app, id);
+            let (snap_org, snap_email, subscription) =
+                snap_info.get(id).cloned().unwrap_or_default();
+            // Claude's identity is persisted in settings (captured on login). Other services
+            // (Gemini) carry theirs on the snapshot: the email is best-effort from the sign-in
+            // scrape, organization_name is the service label. The plan/subscription comes from the
+            // snapshot for both, so the settings account row can show account + subscription.
             let (org_name, email) = if id == crate::service::CLAUDE {
                 let s = state.settings.lock().unwrap();
                 (s.org_name.clone(), s.account_email.clone())
-            } else if id == crate::service::ANTIGRAVITY {
-                let email = crate::antigravity::account_email(&app);
-                (email.clone(), email)
             } else {
-                (String::new(), String::new())
+                (snap_org, snap_email)
             };
             ServiceStatus {
                 id: id.to_string(),
@@ -212,6 +234,7 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
                 logged_in,
                 org_name,
                 email,
+                subscription,
             }
         })
         .collect()
@@ -222,9 +245,9 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
 #[tauri::command]
 pub fn open_login_window(app: AppHandle, service: Option<String>) -> Result<(), String> {
     let service = crate::service::normalize(service.as_deref());
-    // Antigravity uses a system-browser OAuth loopback (Google blocks embedded webviews).
-    if service == crate::service::ANTIGRAVITY {
-        crate::antigravity::start_login(&app);
+    // Gemini signs in via a separate helper process (Google blocks embedded webviews).
+    if service == crate::service::GEMINI {
+        crate::gemini::start_login(&app);
         return Ok(());
     }
     // Claude: embedded claude.ai login webview.
@@ -379,6 +402,19 @@ pub fn set_widget_opacity(
         settings.clone()
     };
     let _ = app.emit("settings://changed", &updated);
+    Ok(())
+}
+
+/// Show or hide a single service's widget from the Widget Style window. Persists the choice and
+/// applies it to the live window immediately (the watchdog keeps it in sync afterward).
+#[tauri::command]
+pub fn set_widget_visible(
+    app: AppHandle,
+    service: Option<String>,
+    visible: bool,
+) -> Result<(), String> {
+    let service = crate::service::normalize(service.as_deref());
+    windows::apply_widget_visible(&app, &service, visible);
     Ok(())
 }
 

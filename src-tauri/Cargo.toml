@@ -1,7 +1,7 @@
 [package]
 name = "sessionmeter"
-version = "0.4.0"
-description = "Claude and Antigravity usage tray, widget, and stats for the desktop"
+version = "0.4.1"
+description = "Claude and Gemini usage tray, widget, and stats for the desktop"
 authors = ["soma0sd"]
 license = "MIT"
 repository = "https://github.com/soma0sd/Session-Meter"

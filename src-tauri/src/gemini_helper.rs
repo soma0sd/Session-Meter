@@ -94,7 +94,15 @@ const SCRAPE_JS: &str = r#"(function(){
     if(res.length>=1){
       var pm=text.match(/\b(ultra|pro|advanced|free)\b/i);
       var plan=pm?pm[1].charAt(0).toUpperCase()+pm[1].slice(1).toLowerCase():"";
-      post('SCRAPE:'+JSON.stringify({items:res.slice(0,2),plan:plan}));
+      // Best-effort Google account email from the account button's label (may be absent).
+      var email="";
+      try{
+        var ab=document.querySelector('a[href*="SignOutOptions"]');
+        var src=ab?(ab.getAttribute('aria-label')||ab.getAttribute('title')||ab.textContent||""):"";
+        var em=src.match(/[\w.+-]+@[\w.-]+\.\w+/);
+        if(em)email=em[0];
+      }catch(e){}
+      post('SCRAPE:'+JSON.stringify({items:res.slice(0,2),plan:plan,email:email}));
       return true;
     }
     // Signed-out landing page: no account button (SignOutOptions), but a sign-in link to the

@@ -53,10 +53,10 @@ export function catalogEntry(id: string): StyleCatalogEntry {
 }
 
 /** Per-service widget metric colours (RGB triplets for `rgb(var(--m1))`), matched to each
- * service's brand: Claude coral/amber, Antigravity/Gemini blue/purple. */
+ * service's brand: Claude coral/amber, Gemini blue/purple. */
 export const serviceColors: Record<string, { m1: string; m2: string }> = {
   claude: { m1: "217 119 87", m2: "224 164 88" },
-  antigravity: { m1: "66 133 244", m2: "167 85 247" },
+  gemini: { m1: "66 133 244", m2: "167 85 247" },
 };
 
 export function colorsFor(service: string): { m1: string; m2: string } {

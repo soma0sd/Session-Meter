@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { locale } from "../i18n";
-  import { formatCountdown } from "../countdown";
+  import { formatClock } from "../countdown";
   import { shownPct, type WidgetStyleProps } from "./types";
   import InfoGrid from "./InfoGrid.svelte";
 
@@ -48,7 +47,7 @@
     <div class="bar thin"><div class="fill s" style="width:{sShown}%"></div></div>
     <div class="crow small">
       <span class="val s">{sShown}%</span>
-      <span class="reset">{formatCountdown(primaryResetMs, $locale)}</span>
+      <span class="reset">{formatClock(primaryResetMs)}</span>
     </div>
   </div>
 {/if}

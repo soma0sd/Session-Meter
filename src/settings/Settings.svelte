@@ -148,7 +148,7 @@
     try {
       await openLoginWindow(service);
     } catch {
-      // Login for this service may not be available yet (e.g. Antigravity before OAuth).
+      // Login for this service may not be available yet (e.g. Gemini before sign-in).
     } finally {
       // The login window is now open (Claude); capture is driven by Rust and a
       // `session://changed` event refreshes the account list. Reset the button so it never
@@ -216,7 +216,9 @@
         <div class="acct">
           <span class="acct-name">{svc.name}</span>
           {#if svc.logged_in}
-            <span class="acct-email">{svc.email || svc.org_name || ""}</span>
+            {@const account = svc.email || (svc.org_name && svc.org_name !== svc.name ? svc.org_name : "")}
+            {#if account}<span class="acct-email">{account}</span>{/if}
+            {#if svc.subscription}<span class="acct-sub">{svc.subscription}</span>{/if}
           {:else}
             <span class="acct-email">{$t("settings.signedOut")}</span>
           {/if}
@@ -471,6 +473,20 @@
   .acct-email {
     font-size: 0.74rem;
     color: rgb(var(--fg-muted));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .acct-sub {
+    align-self: flex-start;
+    max-width: 100%;
+    margin-top: 2px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgb(var(--accent) / 0.16);
+    color: rgb(var(--accent));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

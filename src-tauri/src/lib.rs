@@ -1,9 +1,9 @@
-mod antigravity;
 mod api;
 mod auth;
 mod commands;
 mod config;
 mod error;
+mod gemini;
 mod gemini_helper;
 mod history;
 mod i18n;
@@ -65,6 +65,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
+            // One-time: migrate the renamed Antigravity->Gemini service's persisted files
+            // (session, history, window position) before anything reads them.
+            config::migrate_service_rename(&handle);
             let settings = config::load(&handle);
             app.manage(AppState::new(settings));
             tray::build_tray(&handle)?;
@@ -90,12 +93,9 @@ pub fn run() {
             // Poll immediately on start, then every refresh_interval_min.
             poller::start(&handle);
 
-            // Background: check GitHub for a newer signed release; the UI surfaces it via
-            // the `update://available` event (silent if offline / no release yet).
-            {
-                let h = handle.clone();
-                tauri::async_runtime::spawn(async move { update::check_and_emit(&h).await; });
-            }
+            // Check GitHub for a newer signed release on startup and every 10 minutes; the UI
+            // surfaces it via the `update://available` event (silent if offline / no release yet).
+            update::start_periodic(&handle);
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -166,6 +166,7 @@ pub fn run() {
             commands::set_always_on_top,
             commands::set_move_lock,
             commands::set_widget_opacity,
+            commands::set_widget_visible,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

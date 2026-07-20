@@ -36,7 +36,7 @@ pub struct Bucket {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct UsageSnapshot {
-    /// Which service this snapshot describes ("claude" | "antigravity").
+    /// Which service this snapshot describes ("claude" | "gemini").
     pub service_id: String,
     pub five_hour: Option<WindowUsage>,
     pub weekly_primary: Option<WindowUsage>,

@@ -1,4 +1,4 @@
-//! Antigravity / Gemini usage provider (parent side).
+//! Gemini usage provider (parent side).
 //!
 //! There is no OAuth-token API for the Gemini subscription's aggregate current/weekly usage; the
 //! numbers live behind the Google web session on gemini.google.com/usage. Google also blocks
@@ -21,7 +21,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::api::{now_iso, Bucket, UsageSnapshot, WindowUsage};
 use crate::error::AppError;
-use crate::service::ANTIGRAVITY;
+use crate::service::GEMINI;
 
 // A logged-in marker stored in the (main-app) session file so `service::has_session` reports the
 // service as signed in. The real Google session lives only in the helper's WebView2 profile; the
@@ -76,11 +76,9 @@ struct ScrapeResult {
     items: Vec<ScrapeItem>,
     #[serde(default)]
     plan: String,
-}
-
-/// Identity is not captured (the helper does not surface the account email).
-pub fn account_email(_app: &AppHandle) -> String {
-    String::new()
+    /// Google account email, best-effort from the /usage account button (may be empty).
+    #[serde(default)]
+    email: String,
 }
 
 /// Dedicated WebView2 user-data-folder for the helper processes, isolated from the main app's
@@ -153,14 +151,14 @@ fn build_snapshot(json: &str) -> Result<UsageSnapshot, AppError> {
     let five_hour = buckets.first().map(to_window);
     let weekly_primary = buckets.get(1).map(to_window);
     Ok(UsageSnapshot {
-        service_id: ANTIGRAVITY.to_string(),
+        service_id: GEMINI.to_string(),
         five_hour,
         weekly_primary,
         primary_key: Some("current".to_string()),
         secondary_key: Some("weekly".to_string()),
         buckets,
-        organization_name: "Antigravity".to_string(),
-        account_email: String::new(),
+        organization_name: "Gemini".to_string(),
+        account_email: parsed.email.clone(),
         subscription: if parsed.plan.is_empty() {
             String::new()
         } else {
@@ -193,10 +191,10 @@ pub fn start_login(app: &AppHandle) {
         match result.as_deref() {
             Some("LOGIN_OK") => {
                 eprintln!("[cg][ag] google session captured (helper)");
-                let _ = crate::config::save_cookie(&app, ANTIGRAVITY, LOGGED_IN_MARKER);
+                let _ = crate::config::save_cookie(&app, GEMINI, LOGGED_IN_MARKER);
                 let _ = app.emit(
                     "session://changed",
-                    serde_json::json!({ "service": ANTIGRAVITY, "logged_in": true, "org_name": "Antigravity", "email": "" }),
+                    serde_json::json!({ "service": GEMINI, "logged_in": true, "org_name": "Gemini", "email": "" }),
                 );
                 let app2 = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -212,7 +210,7 @@ pub fn start_login(app: &AppHandle) {
 
 /// Single entry point for `service::fetch`: scrape /usage in a separate process.
 pub async fn fetch(app: &AppHandle, _client: &reqwest::Client) -> Result<UsageSnapshot, AppError> {
-    if crate::config::load_cookie(app, ANTIGRAVITY).is_none() {
+    if crate::config::load_cookie(app, GEMINI).is_none() {
         return Err(AppError::NoSession);
     }
     let app = app.clone();

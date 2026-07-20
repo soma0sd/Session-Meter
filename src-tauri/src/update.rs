@@ -66,3 +66,16 @@ pub async fn check_and_emit(app: &AppHandle) {
         }
     }
 }
+
+/// Check for updates on startup and then every 10 minutes, so a release published while the app
+/// is running is surfaced (widget + tray install button) without needing a restart. Idempotent:
+/// `check_and_emit` only emits when an update is available, so repeated calls are harmless.
+pub fn start_periodic(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            check_and_emit(&app).await;
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+        }
+    });
+}

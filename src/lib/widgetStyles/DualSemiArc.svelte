@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { locale } from "../i18n";
-  import { formatCountdown } from "../countdown";
+  import { formatClock } from "../countdown";
   import { shownPct, type WidgetStyleProps } from "./types";
   import InfoGrid from "./InfoGrid.svelte";
 
@@ -33,7 +32,7 @@
       <path class="track" d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" />
       <path class="s" d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" stroke-dasharray={INNER_LEN} stroke-dashoffset={innerOff} />
     </svg>
-    <div class="center">{formatCountdown(primaryResetMs, $locale)}</div>
+    <div class="center">{formatClock(primaryResetMs)}</div>
   </div>
 
   {#if variant === "detailed"}

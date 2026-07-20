@@ -20,13 +20,13 @@
 > 상표입니다. SessionMeter는 해당 상표를 제품명으로 사용하지 않으며, 호환 대상을 설명하기 위해서만
 > "Claude"를 언급합니다.
 >
-> **Antigravity(Gemini 구독)는 훨씬 더 비공식적·실험적입니다.** 공식 API가 없어, 별도 프로세스로 띄운
+> **Gemini는 훨씬 더 비공식적·실험적입니다.** 공식 API가 없어, 별도 프로세스로 띄운
 > 내장 로그인 창에서 본인 Google 계정으로 로그인한 뒤 gemini.google.com/usage 페이지의 사용량 표시를
 > 그대로 읽어옵니다(화면 스크래핑). Google은 임베드 브라우저의 로그인을 정책적으로 차단하므로, 이 창은
-> 일반 브라우저처럼 보이도록 위장한 상태로 동작합니다 — Google이 이를 다시 차단하면 로그인이 실패할 수
+> 일반 브라우저처럼 보이도록 위장한 상태로 동작합니다. Google이 이를 다시 차단하면 로그인이 실패할 수
 > 있으며, 페이지 구조가 바뀌면 수치가 잘못 표시되거나 조회가 실패할 수 있습니다. 반드시
 > [Google 서비스 약관](https://policies.google.com/terms)을 확인하고 **본인 책임**으로 사용하십시오.
-> "Antigravity"·"Gemini"는 Google LLC의 상표이며 본 프로젝트는 Google과 무관합니다.
+> "Gemini"는 Google LLC의 상표이며 본 프로젝트는 Google과 무관합니다.
 
 ## 기능
 
@@ -55,6 +55,22 @@
 
 - Windows 10/11(주 대상, macOS/Linux는 best-effort).
 - [WebView2 런타임](https://developer.microsoft.com/microsoft-edge/webview2/)(최신 Windows에는 기본 포함).
+
+## 설치
+
+개발 환경 없이 바로 사용하려면 미리 빌드된 Windows 설치 프로그램을 내려받으십시오.
+
+1. **[최신 릴리스 페이지](https://github.com/soma0sd/Session-Meter/releases/latest)** 로 이동합니다.
+2. **Assets** 목록에서 `SessionMeter_x.y.z_x64-setup.exe`(NSIS 설치 프로그램)를 내려받습니다
+   (`x.y.z`는 버전 번호).
+3. 내려받은 파일을 실행해 설치합니다. 서명되지 않은 빌드라 Windows SmartScreen 경고가 뜨면
+   **추가 정보 → 실행**을 눌러 진행합니다.
+4. 설치가 끝나면 앱이 시스템 트레이에만 나타납니다(작업 표시줄에 창이 뜨지 않음). 트레이 아이콘을
+   **좌클릭**하면 위젯이, **우클릭**하면 메뉴가 열립니다.
+5. 위젯 또는 설정 창에서 claude.ai(선택적으로 Gemini)에 로그인하면 사용량이 표시됩니다.
+
+새 버전이 나오면 앱이 자동으로 확인해 위젯·트레이 메뉴에 설치 버튼을 띄웁니다. 버튼을 누르면
+내려받아 설치하고 재실행합니다(자동 설치는 아님).
 
 ## 개발
 
@@ -94,6 +110,7 @@ npm run tauri build    # 릴리스 빌드 + 설치 프로그램(NSIS) 생성
 - 공식 Admin API 패널(개발자 API 토큰 사용량·비용(USD); Admin API 키 필요).
 - 다중 계정.
 - 사용 이력 CSV 내보내기.
+- 위젯 그리드 도킹: 여러 위젯을 그리드로 붙여 배치·고정하고, 붙인 상태로 함께 이동.
 
 ## 라이선스
 

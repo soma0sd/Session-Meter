@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { t, locale } from "../lib/i18n";
   import { initWindow } from "../lib/appinit";
   import { applyTheme, type Theme } from "../lib/theme";
@@ -65,6 +66,24 @@
     await loadService();
   }
 
+  // Re-read the logged-in service list (on focus and on sign-in/out) so a service that signed in
+  // elsewhere - or that was missed by an early startup fetch (the stats webview can load before
+  // the app state is ready, unlike the style window it did not re-fetch) - appears as a tab. The
+  // active tab keeps its data; only switch if the current service is no longer logged in.
+  async function refreshServices() {
+    let next: ServiceStatus[];
+    try {
+      next = await getServicesStatus();
+    } catch {
+      return;
+    }
+    services = next;
+    const li = services.filter((x) => x.logged_in);
+    if (li.length && !li.some((x) => x.id === activeService)) {
+      await switchService(li[0].id);
+    }
+  }
+
   onMount(async () => {
     await initWindow();
     try {
@@ -86,8 +105,14 @@
           }
         }),
       );
+      unlisteners.push(await listen("session://changed", () => void refreshServices()));
       unlisteners.push(
         await listen<string>("theme://changed", (e) => applyTheme(e.payload as Theme)),
+      );
+      unlisteners.push(
+        await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+          if (focused) void refreshServices();
+        }),
       );
     } catch {
       /* preview */

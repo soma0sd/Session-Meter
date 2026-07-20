@@ -41,7 +41,14 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: "SessionMeter ${{ github.ref_name }}"
-          # Draft releases are NOT seen by the updater's `releases/latest` endpoint;
-          # publish the drafted release to make an update available to installed apps.
-          releaseDraft: true
+          # Publish as a PRERELEASE (not a draft), then promote it manually to ship the update.
+          # Why not a draft: a draft has no real git tag, and publishing it can leave the release
+          # detached from the version tag (an "untagged-<hash>" slug), which breaks the updater's
+          # installer URL (releases/download/vX.Y.Z/...setup.exe -> 404). A prerelease is created
+          # already tagged, so the assets are always reachable.
+          # Gate: the updater's `releases/latest` endpoint ignores prereleases, so installed apps
+          # do NOT see it yet. To ship to users, edit the release on GitHub and uncheck
+          # "Set as a pre-release" (promote to Latest) — the tag stays intact.
+          releaseDraft: false
+          prerelease: true
           releaseBody: "See the changelog for details."

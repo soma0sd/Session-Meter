@@ -240,6 +240,24 @@ fn set_widget_visible(app: &AppHandle, service: &str, visible: bool) {
     let _ = app.emit("settings://changed", &snap);
 }
 
+/// Set a service widget's visibility from the UI (Widget Style window): persist the choice and
+/// show/hide the existing window immediately. Window creation is left to `show_widget` / the
+/// watchdog (avoids off-main-thread window builds); a logged-in service already has its window.
+pub fn apply_widget_visible(app: &AppHandle, service: &str, visible: bool) {
+    set_widget_visible(app, service, visible);
+    if let Some(win) = app.get_webview_window(&widget_label(service)) {
+        if visible {
+            if !matches!(win.is_visible(), Ok(true)) {
+                place_widget(app, &win, service);
+            }
+            let _ = win.show();
+        } else {
+            save_widget_pos(app, service);
+            let _ = win.hide();
+        }
+    }
+}
+
 /// Show each service's widget on startup, unless the user had it hidden.
 pub fn show_widget(app: &AppHandle) {
     for svc in widget_services(app) {
