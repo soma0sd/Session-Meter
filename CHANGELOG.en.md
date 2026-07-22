@@ -57,6 +57,10 @@ All notable changes to this project are documented here. The format is based on
   autostart (launch-at-startup) entry pointed at a path that no longer matched the real
   executable, a reboot relaunched the stale old binary. On startup, if autostart is enabled, the
   app now re-registers it against the current executable path, self-healing the stale entry.
+- **Fixed the widget style resetting to default after an update**: saving settings replaced the
+  whole per-service widget map; it now merges, keeping the stored widget config for any service
+  the save omits, so a settings save that runs before the widget config has loaded can no longer
+  wipe the user's widget styles.
 
 ## [0.3] - 2026-07-19
 

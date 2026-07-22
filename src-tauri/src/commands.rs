@@ -86,8 +86,23 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 /// theme/settings change events. (Autostart is toggled via its own command; the poll
 /// interval is picked up automatically by the poller.)
 #[tauri::command]
-pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
+pub fn set_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> Result<(), String> {
     let prev = state.settings.lock().unwrap().clone();
+
+    // Preserve stored per-service widget config for any service the incoming payload omits. Only
+    // the Widget Style window owns widget config; the Settings window sends the whole Settings
+    // object and can carry a not-yet-loaded (empty) or stale `widgets` map (its `s` starts from
+    // defaults and is filled by an async `getSettings()`). A blind replace would then wipe the
+    // user's widget styles - observed as the widget style resetting after an update, when the
+    // freshly re-created Settings window saved before its `widgets` had loaded. Merge instead:
+    // services present in the payload win; services absent keep their stored config. This is the
+    // only place a full `widgets` map is written from the frontend, so it is the single guard.
+    for (svc, wc) in &prev.widgets {
+        settings
+            .widgets
+            .entry(svc.clone())
+            .or_insert_with(|| wc.clone());
+    }
 
     // Re-assert each service widget's always-on-top from its (possibly changed) config.
     for (svc, wc) in &settings.widgets {

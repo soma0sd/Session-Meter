@@ -3624,7 +3624,7 @@ dependencies = [
 
 [[package]]
 name = "sessionmeter"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "ab_glyph",
  "reqwest 0.12.28",
