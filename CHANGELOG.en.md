@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
-## [0.4] - 2026-07-20
+## [0.4] - 2026-07-22
 
 ### Added
 
@@ -53,6 +53,10 @@ All notable changes to this project are documented here. The format is based on
   settings file is now rewritten to the current format on first launch instead of being
   re-derived every launch, and the settings/widget-style windows re-read the latest settings on
   focus so a change in one window can't be reverted by a stale save in another.
+- **Fixed the app reverting to an older version after an update followed by a reboot**: when the
+  autostart (launch-at-startup) entry pointed at a path that no longer matched the real
+  executable, a reboot relaunched the stale old binary. On startup, if autostart is enabled, the
+  app now re-registers it against the current executable path, self-healing the stale entry.
 
 ## [0.3] - 2026-07-19
 

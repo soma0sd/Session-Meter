@@ -1,6 +1,6 @@
 [package]
 name = "sessionmeter"
-version = "0.4.2"
+version = "0.4.3"
 description = "Claude and Gemini usage tray, widget, and stats for the desktop"
 authors = ["soma0sd"]
 license = "MIT"

@@ -70,6 +70,17 @@ pub fn run() {
             config::migrate_service_rename(&handle);
             let settings = config::load(&handle);
             app.manage(AppState::new(settings));
+
+            // Self-heal a stale autostart path. `tauri-plugin-autostart` records the launch
+            // command from `current_exe()` when autostart is first enabled and never revalidates
+            // it. If the exe later moves or is reinstalled elsewhere, the Run-key entry keeps
+            // launching the OLD binary on every boot even after an update. (Observed: autostart
+            // was enabled while an earlier build ran under a virtualized/sandboxed exe path, so a
+            // reboot kept relaunching that stale old version while the real install updated fine.)
+            // On startup, if autostart is enabled, re-register so the stored path is rewritten to
+            // THIS process's exe (captured by the plugin at init = the real install path).
+            heal_autostart(&handle);
+
             tray::build_tray(&handle)?;
 
             // Always show the desktop widget on startup (including first run, before
@@ -171,3 +182,20 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+/// Rewrite the autostart Run-key path to the current executable when autostart is enabled, so a
+/// stale path (from a moved/reinstalled/sandboxed exe) can't keep launching an old version on
+/// boot. Only acts when already enabled, which respects a Task-Manager disable (reflected by
+/// `is_enabled()`); `enable()` overwrites the stored value with the plugin's init-time
+/// `current_exe()`. Release-only: in dev the current exe is a target/debug path we must not persist.
+#[cfg(not(debug_assertions))]
+fn heal_autostart(app: &tauri::AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+    let al = app.autolaunch();
+    if al.is_enabled().unwrap_or(false) {
+        let _ = al.enable();
+    }
+}
+
+#[cfg(debug_assertions)]
+fn heal_autostart(_app: &tauri::AppHandle) {}
