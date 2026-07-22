@@ -61,6 +61,10 @@ All notable changes to this project are documented here. The format is based on
   whole per-service widget map; it now merges, keeping the stored widget config for any service
   the save omits, so a settings save that runs before the widget config has loaded can no longer
   wipe the user's widget styles.
+- **Fixed the what's-new window showing only up to version 0.3**: the fallback used when the
+  GitHub fetch fails was a hand-maintained copy that had gone stale; it now bundles the actual
+  changelog at build time, so it always matches the installed version. Multi-line entries are no
+  longer truncated at their first line.
 
 ## [0.3] - 2026-07-19
 

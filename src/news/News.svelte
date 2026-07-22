@@ -7,7 +7,10 @@
   import { applyTheme, type Theme } from "../lib/theme";
   import TitleBar from "../lib/TitleBar.svelte";
   import { getChangelog } from "../lib/ipc";
-  import { changelog } from "../lib/changelog";
+  // Bundle the actual changelog files at build time so the fallback (used when the GitHub fetch
+  // fails) always matches the shipped version, instead of a hand-maintained copy that goes stale.
+  import changelogKo from "../../CHANGELOG.md?raw";
+  import changelogEn from "../../CHANGELOG.en.md?raw";
 
   type Entry = { version: string; date: string; lines: string[] };
 
@@ -17,8 +20,11 @@
 
   // Parse a Keep-a-Changelog markdown file into version entries.
   function parse(md: string): Entry[] {
+    // Join wrapped continuation lines (indented, no leading bullet) back onto their bullet, so a
+    // multi-line changelog entry is not truncated at its first line.
+    const joined = md.replace(/\n[ \t]+(?=\S)/g, " ");
     const out: Entry[] = [];
-    for (const block of md.split(/\n## /)) {
+    for (const block of joined.split(/\n## /)) {
       const nl = block.indexOf("\n");
       const header = (nl >= 0 ? block.slice(0, nl) : block).trim();
       const m = header.match(/\[?(\d+\.\d+(?:\.\d+)?)\]?\s*-\s*(.+)/);
@@ -31,13 +37,10 @@
     return out;
   }
 
-  // Bundled changelog, used when the GitHub fetch fails (offline / repo not published yet).
+  // Bundled changelog (parsed from the files shipped in this build), used when the GitHub fetch
+  // fails (offline / repo unreachable). Always matches the installed version.
   function fallback(loc: string): Entry[] {
-    return changelog.map((e) => ({
-      version: e.version,
-      date: e.date,
-      lines: loc === "ko" ? e.ko : e.en,
-    }));
+    return parse(loc === "ko" ? changelogKo : changelogEn);
   }
 
   async function load() {
