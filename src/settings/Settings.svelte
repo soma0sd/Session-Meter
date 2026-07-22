@@ -33,6 +33,7 @@
     history_retention_days: 30,
     org_name: "",
     account_email: "",
+    dock: { enabled: false, columns: 2, order: [], anchor_x: 0, anchor_y: 0 },
   };
 
   let s = $state<Settings>(structuredClone(DEFAULTS));
@@ -226,28 +227,44 @@
   <section>
     <h2>{$t("settings.section.account")}</h2>
     {#each services as svc (svc.id)}
-      <div class="account">
-        <div class="acct">
-          <span class="acct-name">{svc.name}</span>
-          {#if svc.logged_in}
-            {@const account = svc.email || (svc.org_name && svc.org_name !== svc.name ? svc.org_name : "")}
-            {#if account}<span class="acct-email">{account}</span>{/if}
+      {#if svc.id === "antigravity_ide"}
+        <!-- No login/logout: monitoring is fully automatic (see service::has_session). This
+             row is purely informational - current reachability + whatever account identity
+             the IDE's local API happens to expose (best-effort, may be empty). -->
+        <div class="account">
+          <div class="acct">
+            <span class="acct-name">{svc.name}</span>
+            {#if svc.email}<span class="acct-email">{svc.email}</span>{/if}
             {#if svc.subscription}<span class="acct-sub">{svc.subscription}</span>{/if}
+          </div>
+          <span class="status-pill" class:on={svc.live_status === "ok"}>
+            {svc.live_status === "ok" ? $t("settings.antigravityRunning") : $t("settings.antigravityWaiting")}
+          </span>
+        </div>
+      {:else}
+        <div class="account">
+          <div class="acct">
+            <span class="acct-name">{svc.name}</span>
+            {#if svc.logged_in}
+              {@const account = svc.email || (svc.org_name && svc.org_name !== svc.name ? svc.org_name : "")}
+              {#if account}<span class="acct-email">{account}</span>{/if}
+              {#if svc.subscription}<span class="acct-sub">{svc.subscription}</span>{/if}
+            {:else}
+              <span class="acct-email">{$t("settings.signedOut")}</span>
+            {/if}
+          </div>
+          {#if svc.logged_in}
+            <button class="btn" onclick={() => signOut(svc.id)}>{$t("settings.signOut")}</button>
           {:else}
-            <span class="acct-email">{$t("settings.signedOut")}</span>
+            <button
+              class="btn primary"
+              onclick={() => signIn(svc.id)}
+              disabled={signingIn === svc.id}>
+              {signingIn === svc.id ? $t("settings.signingIn") : $t("settings.signIn")}
+            </button>
           {/if}
         </div>
-        {#if svc.logged_in}
-          <button class="btn" onclick={() => signOut(svc.id)}>{$t("settings.signOut")}</button>
-        {:else}
-          <button
-            class="btn primary"
-            onclick={() => signIn(svc.id)}
-            disabled={signingIn === svc.id}>
-            {signingIn === svc.id ? $t("settings.signingIn") : $t("settings.signIn")}
-          </button>
-        {/if}
-      </div>
+      {/if}
     {/each}
   </section>
 
@@ -504,6 +521,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .status-pill {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgb(var(--fg-muted) / 0.16);
+    color: rgb(var(--fg-muted));
+    white-space: nowrap;
+  }
+  .status-pill.on {
+    background: rgb(var(--ok) / 0.16);
+    color: rgb(var(--ok));
   }
   .btn {
     padding: 6px 13px;

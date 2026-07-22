@@ -16,12 +16,15 @@
     getUpdateState,
     installUpdate,
     widgetConfig,
+    dockMoveTo,
+    dockMoveEnd,
+    dockRelayout,
     type UsageSnapshot,
     type Settings,
     type UpdateInfo,
   } from "../lib/ipc";
   import WidgetStyle from "../lib/widgetStyles/WidgetStyle.svelte";
-  import { DEFAULT_STYLE, colorsFor } from "../lib/widgetStyles/types";
+  import { DEFAULT_STYLE, colorsFor, serviceIcons } from "../lib/widgetStyles/types";
 
   // The window is sized to the panel content; this caps how wide a long label can push it.
   const MAX_W = 360;
@@ -32,15 +35,12 @@
   const SERVICE_NAMES: Record<string, string> = {
     claude: "Claude",
     gemini: "Gemini",
+    antigravity_ide: "Antigravity",
   };
 
   // Small brand marks shown before the service name in the widget title, tinted with the
-  // service's metric colour (--m1). Distinct silhouettes: Claude a radial spark, Gemini a
-  // four-point sparkle.
-  const SERVICE_ICONS: Record<string, string> = {
-    claude: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1.7v12.6M1.7 8h12.6M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`,
-    gemini: `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 1.5Q8 8 14.5 8Q8 8 8 14.5Q8 8 1.5 8Q8 8 8 1.5Z"/></svg>`,
-  };
+  // service's metric colour (--m1). Shared with Style.svelte's Placement tab - see types.ts.
+  const SERVICE_ICONS = serviceIcons;
 
   // Which service this widget window monitors, derived from its window label
   // ("widget" == claude, "widget-{service}" otherwise).
@@ -73,6 +73,16 @@
   let displayMode = $state<"remaining" | "used">("remaining");
   let style = $state<string>(DEFAULT_STYLE);
   let now = $state(Date.now());
+  // Widget grid docking: whether this widget currently belongs to an enabled docked group.
+  let dockEnabled = $state(false);
+  let dockOrder = $state<string[]>([]);
+  const amIDocked = $derived(dockEnabled && dockOrder.includes(myService));
+  // Antigravity-only: which model-group bucket pair (gemini | 3p) the headline shows.
+  let headlineGroup = $state<"gemini" | "3p">("gemini");
+  const primaryKeyOverride = $derived(myService === "antigravity_ide" ? `${headlineGroup}-5h` : null);
+  const secondaryKeyOverride = $derived(
+    myService === "antigravity_ide" ? `${headlineGroup}-weekly` : null,
+  );
   let updateInfo = $state<UpdateInfo | null>(null);
   let updating = $state(false);
   let menuOpen = $state(false);
@@ -92,8 +102,33 @@
     moveLocked = wc.move_lock;
     displayMode = wc.display_mode;
     style = wc.style || DEFAULT_STYLE;
+    headlineGroup = wc.headline_group === "3p" ? "3p" : "gemini";
+    dockEnabled = s.dock?.enabled ?? false;
+    dockOrder = s.dock?.order ?? [];
     applyTheme(s.theme as Theme);
     document.documentElement.style.setProperty("--panel-alpha", String(wc.opacity));
+  }
+
+  // The static "widget" (Claude) window is created by Tauri's builder before `setup()` runs,
+  // so its webview can start executing JS before Rust has finished loading settings and
+  // `manage()`-ing AppState - an `invoke()` that early fails outright rather than returning
+  // stale data. Silently swallowing that failure (the old `catch {}`) left `style` (and
+  // everything else `applySettings` sets) stuck at its compile-time default forever. A few
+  // quick retries cover that narrow startup window; when the first call already succeeds (the
+  // overwhelmingly common case, and always the case for a dynamically-created window like
+  // Gemini/Antigravity, which only ever gets created after setup() finishes), this resolves
+  // on the first attempt with no extra cost. Only retries on a thrown error - a call that
+  // succeeds with a legitimate "nothing yet" value (e.g. `getUsage` returning null) is not
+  // retried, since that's a normal state, not a failure.
+  async function retryInvoke<T>(fn: () => Promise<T>, attempts = 5, delayMs = 150): Promise<T | undefined> {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch {
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    return undefined;
   }
 
   // Size the window to hug the panel content (width + height), so a compact style makes a
@@ -108,6 +143,10 @@
     try {
       const { LogicalSize } = await import("@tauri-apps/api/dpi");
       await getCurrentWindow().setSize(new LogicalSize(w, h));
+      // Content resized (style switch, DPI change, kebab toggle, ...): ask the dock layout
+      // to re-run now that the live outer_size Rust reads back has actually changed. A no-op
+      // when this widget isn't part of an enabled docked group.
+      void dockRelayout().catch(() => {});
     } catch {
       /* not in Tauri */
     }
@@ -126,22 +165,33 @@
     void fitWindow();
   });
 
+  // Measure the body element directly, the moment it exists (`bodyEl` only appears once a
+  // snapshot has loaded successfully - before that there's just a "loading" placeholder, no
+  // `.body` div to bind). `ResizeObserver.observe()` delivers an immediate first callback with
+  // the element's current size regardless of when it's attached, which is what makes this
+  // reliable no matter how long the first snapshot took (Antigravity's process/port discovery
+  // is slower than Claude/Gemini's cached read, so its body can mount well after this
+  // component's other effects already ran once). This alone isn't sufficient, though: see
+  // `.body`'s `align-self: flex-start` below for the actual root cause of why a late-arriving
+  // measurement used to come back wrong, not just late.
+  $effect(() => {
+    if (!bodyEl || !("ResizeObserver" in window)) return;
+    const el = bodyEl;
+    const bodyRo = new ResizeObserver(() => void fitWindow());
+    bodyRo.observe(el);
+    return () => bodyRo.disconnect();
+  });
+
   onMount(async () => {
     await initWindow();
     // Colour the widget's metrics to match the service's brand.
     const c = colorsFor(myService);
     document.documentElement.style.setProperty("--m1", c.m1);
     document.documentElement.style.setProperty("--m2", c.m2);
-    try {
-      snap = await getUsage(myService);
-    } catch {
-      /* preview */
-    }
-    try {
-      applySettings(await getSettings());
-    } catch {
-      /* preview */
-    }
+    const initialSnap = await retryInvoke(() => getUsage(myService));
+    if (initialSnap !== undefined) snap = initialSnap;
+    const initialSettings = await retryInvoke(() => getSettings());
+    if (initialSettings !== undefined) applySettings(initialSettings);
     try {
       updateInfo = await getUpdateState();
     } catch {
@@ -200,15 +250,92 @@
     }
   }
 
-  function startDrag(e: MouseEvent) {
+  // Group drag state (docked widgets only). A docked widget cannot use the native
+  // startDragging() - moving only its own OS window would leave the rest of the group
+  // behind - so it drives the drag itself via pointer capture and reports the resulting
+  // absolute position to Rust each frame; Rust owns turning that into a group move.
+  let dragPointerId: number | null = null;
+  // True once the async `outerPosition()` baseline (below) has resolved. `onDragMove` ignores
+  // moves until then - the alternative (computing a delta against a not-yet-known start
+  // position) would send Rust a wrong absolute position for the first few frames.
+  let dragReady = false;
+  let dragStartScreenX = 0;
+  let dragStartScreenY = 0;
+  let dragStartWinX = 0;
+  let dragStartWinY = 0;
+  let dragRafPending = false;
+  let dragLatestScreenX = 0;
+  let dragLatestScreenY = 0;
+
+  function startDrag(e: PointerEvent) {
     const target = e.target as HTMLElement;
     // A click on the panel background (not a control) closes an open menu and starts a drag.
     if (menuOpen && !target.closest(".menu") && !target.closest(".kebab")) menuOpen = false;
     if (moveLocked || e.button !== 0) return;
     if (target.closest("button")) return;
+
+    if (amIDocked) {
+      // Capture the pointer FIRST, synchronously - before any await. The widget panel is
+      // small, so fast mouse movement right after pointerdown can otherwise carry the cursor
+      // off the panel before capture is established; once that happens, subsequent
+      // pointermove/pointerup route to whatever element is now under the cursor instead of
+      // here, which is exactly what made dragging feel like it lost track of the mouse and
+      // never noticed the drag ending. `e.currentTarget` is also only valid synchronously
+      // during dispatch (the DOM clears it once dispatch finishes), so it must be read now,
+      // not after the `outerPosition()` await below.
+      const panel = e.currentTarget as HTMLElement;
+      dragPointerId = e.pointerId;
+      dragReady = false;
+      panel.setPointerCapture(e.pointerId);
+      dragStartScreenX = e.screenX;
+      dragStartScreenY = e.screenY;
+      void getCurrentWindow()
+        .outerPosition()
+        .then((pos) => {
+          dragStartWinX = pos.x;
+          dragStartWinY = pos.y;
+          dragReady = true;
+        })
+        .catch(() => {
+          dragPointerId = null;
+        });
+      return;
+    }
     getCurrentWindow()
       .startDragging()
       .catch(() => {});
+  }
+
+  function onDragMove(e: PointerEvent) {
+    if (dragPointerId === null || e.pointerId !== dragPointerId || !dragReady) return;
+    dragLatestScreenX = e.screenX;
+    dragLatestScreenY = e.screenY;
+    if (dragRafPending) return;
+    dragRafPending = true;
+    requestAnimationFrame(() => {
+      dragRafPending = false;
+      if (dragPointerId === null) return;
+      const scale = window.devicePixelRatio || 1;
+      const dx = Math.round((dragLatestScreenX - dragStartScreenX) * scale);
+      const dy = Math.round((dragLatestScreenY - dragStartScreenY) * scale);
+      void dockMoveTo(myService, dragStartWinX + dx, dragStartWinY + dy).catch(() => {});
+    });
+  }
+
+  function endDrag(e: PointerEvent) {
+    if (dragPointerId === null || e.pointerId !== dragPointerId) return;
+    const wasReady = dragReady;
+    dragPointerId = null;
+    dragReady = false;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    // Persist the anchor now that the drag is actually over (see move_group_to's doc comment
+    // for why it isn't written to disk on every frame during the drag itself). Only if the
+    // drag ever got past the "ready" point - otherwise nothing moved, nothing to save.
+    if (wasReady) void dockMoveEnd().catch(() => {});
   }
 
   function toggleMenu(e: MouseEvent) {
@@ -257,7 +384,14 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="panel" bind:this={panelEl} onmousedown={startDrag}>
+<div
+  class="panel"
+  bind:this={panelEl}
+  onpointerdown={startDrag}
+  onpointermove={onDragMove}
+  onpointerup={endDrag}
+  onpointercancel={endDrag}
+  onlostpointercapture={endDrag}>
   <header>
     <span class="title">
       {#if SERVICE_ICONS[myService]}<span class="svc-icon">{@html SERVICE_ICONS[myService]}</span>{/if}
@@ -318,11 +452,21 @@
     <div class="empty">{$t("common.loading")}</div>
   {:else if snap.status !== "ok"}
     <div class="empty">
-      {snap.status === "unauthorized" ? $t("common.sessionExpired") : $t("common.notLoggedIn")}
+      {snap.status === "unauthorized"
+        ? $t("common.sessionExpired")
+        : snap.status === "not_running"
+          ? $t("common.antigravityNotRunning")
+          : $t("common.notLoggedIn")}
     </div>
   {:else}
     <div class="body" bind:this={bodyEl}>
-      <WidgetStyle styleId={style} snapshot={snap} {now} {displayMode} />
+      <WidgetStyle
+        styleId={style}
+        snapshot={snap}
+        {now}
+        {displayMode}
+        {primaryKeyOverride}
+        {secondaryKeyOverride} />
     </div>
   {/if}
 </div>
@@ -455,6 +599,17 @@
   .body {
     display: flex;
     flex-direction: column;
+    /* Root cause of the icon-collapse bug: `.panel` is a column flex container, and its
+       children default to `align-items: stretch` - so without this, `.body` stretches to
+       *whatever width `.panel` currently happens to be* (which, before the icon row has
+       collapsed, is the wide uncollapsed-header width) instead of its own narrow intrinsic
+       content width. `fitWindow()` then measures that already-stretched (wide) box, `collapsed`
+       computes false again, the header stays wide, and the loop never escapes - a
+       self-reinforcing wrong state that re-measuring more often (which is where the previous
+       fix attempts focused) cannot fix, since every re-measurement just re-confirms the same
+       stretched value. `align-self: flex-start` makes `.body` size to its own natural content
+       width regardless of the panel's current width, so the measurement is always genuine. */
+    align-self: flex-start;
   }
   .empty {
     text-align: center;

@@ -234,7 +234,11 @@
     <div class="empty">{$t("common.loading")}</div>
   {:else if snap.status !== "ok"}
     <div class="empty">
-      {snap.status === "unauthorized" ? $t("common.sessionExpired") : $t("common.notLoggedIn")}
+      {snap.status === "unauthorized"
+        ? $t("common.sessionExpired")
+        : snap.status === "not_running"
+          ? $t("common.antigravityNotRunning")
+          : $t("common.notLoggedIn")}
     </div>
   {:else}
     <section class="cards">

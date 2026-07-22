@@ -26,6 +26,10 @@ pub struct AppState {
     pub login_watching: AtomicBool,
     /// Latest available update (version + notes), set by the startup update check.
     pub update_available: Mutex<Option<crate::update::UpdateInfo>>,
+    /// True while `dock::apply_layout` is repositioning docked widget windows. Lets the
+    /// `WindowEvent::Moved` handler (and `apply_layout` itself) recognize its own relayout
+    /// echoes instead of mistaking them for a user drag or re-entering the relayout.
+    pub dock_relayout_in_progress: AtomicBool,
 }
 
 impl AppState {
@@ -40,6 +44,7 @@ impl AppState {
             notify_state: Mutex::new(NotifyState::default()),
             login_watching: AtomicBool::new(false),
             update_available: Mutex::new(None),
+            dock_relayout_in_progress: AtomicBool::new(false),
         }
     }
 }

@@ -1,7 +1,9 @@
+mod antigravity;
 mod api;
 mod auth;
 mod commands;
 mod config;
+mod dock;
 mod error;
 mod gemini;
 mod gemini_helper;
@@ -114,7 +116,10 @@ pub fn run() {
                 let _ = window.hide();
             }
             // Persist a service widget's position as the user drags it, so a reboot restores
-            // the last placement instead of the default corner.
+            // the last placement instead of the default corner. A docked widget's position is
+            // owned by `dock::apply_layout` instead: its `Moved` events are either an echo of
+            // our own relayout (ignored) or real drift (corrected back onto the grid), and
+            // never persisted individually - the group's one position is the anchor.
             WindowEvent::Moved(pos)
                 if windows::service_from_widget_label(window.label()).is_some() =>
             {
@@ -128,7 +133,20 @@ pub fn run() {
                     && !matches!(window.is_minimized(), Ok(true))
                 {
                     if let Some(service) = windows::service_from_widget_label(window.label()) {
-                        config::save_widget_pos(window.app_handle(), &service, pos.x, pos.y);
+                        let app = window.app_handle();
+                        if dock::is_docked(app, &service) {
+                            let in_progress = app
+                                .try_state::<AppState>()
+                                .map(|s| s.dock_relayout_in_progress.load(Ordering::SeqCst))
+                                .unwrap_or(false);
+                            // If a relayout is mid-flight, this Moved is our own echo of it -
+                            // ignore outright rather than double-handling it in on_widget_moved.
+                            if !in_progress {
+                                dock::on_widget_moved(app, &service, pos.x, pos.y);
+                            }
+                        } else {
+                            config::save_widget_pos(app, &service, pos.x, pos.y);
+                        }
                     }
                 }
             }
@@ -178,6 +196,10 @@ pub fn run() {
             commands::set_move_lock,
             commands::set_widget_opacity,
             commands::set_widget_visible,
+            commands::set_dock_config,
+            commands::dock_move_to,
+            commands::dock_move_end,
+            commands::dock_relayout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

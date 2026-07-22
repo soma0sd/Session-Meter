@@ -7,19 +7,23 @@
   import { applyTheme, type Theme } from "../lib/theme";
   import TitleBar from "../lib/TitleBar.svelte";
   import WidgetStyle from "../lib/widgetStyles/WidgetStyle.svelte";
-  import { catalog, colorsFor } from "../lib/widgetStyles/types";
+  import { catalog, colorsFor, iconFor } from "../lib/widgetStyles/types";
   import {
     getSettings,
     setSettings,
     getUsage,
     getServicesStatus,
     setWidgetVisible,
+    setDockConfig,
     widgetConfig,
     type Settings,
     type UsageSnapshot,
     type ServiceStatus,
     type WidgetConfig,
+    type DockConfigPatch,
   } from "../lib/ipc";
+
+  const LAYOUT_TAB = "__layout__";
 
   let s = $state<Settings | null>(null);
   let services = $state<ServiceStatus[]>([]);
@@ -68,7 +72,10 @@
       return;
     }
     const li = services.filter((x) => x.logged_in);
-    if (li.length && !li.some((x) => x.id === activeService)) {
+    // The "Placement" pseudo-tab is never a real service id, so it must never be treated as
+    // "the active service went away" - otherwise every focus-triggered refresh (see
+    // onFocusChanged below) would bounce the user back to the first service tab.
+    if (li.length && activeService !== LAYOUT_TAB && !li.some((x) => x.id === activeService)) {
       activeService = li[0].id;
     }
     for (const svc of services.filter((x) => x.logged_in)) {
@@ -152,6 +159,66 @@
     if (s) s.widgets = { ...s.widgets, [service]: { ...widgetConfig(s, service), visible } };
     void setWidgetVisible(service, visible);
   }
+
+  // Widget grid docking ("Placement" tab). Until the user has ever touched the order, it
+  // defaults locally to the current logged-in service list - the first edit (enabling,
+  // reordering, or changing columns) is what actually persists it.
+  const dockOrder = $derived(s && s.dock.order.length ? s.dock.order : loggedIn.map((x) => x.id));
+
+  function saveDock(patch: Partial<DockConfigPatch>) {
+    if (!s) return;
+    const next: DockConfigPatch = {
+      enabled: s.dock.enabled,
+      columns: s.dock.columns,
+      order: dockOrder,
+      ...patch,
+    };
+    s = { ...s, dock: { ...s.dock, ...next } };
+    void setDockConfig(next);
+  }
+
+  // Drag-and-drop reordering (native HTML5 DnD - the webview is Chromium-based, so this
+  // works the same as in a browser). `dragIndex` is the row being picked up; `overIndex` is
+  // whichever row the pointer is currently over, used only to draw the drop-position hint.
+  let dragIndex = $state<number | null>(null);
+  let overIndex = $state<number | null>(null);
+
+  function onOrderDragStart(e: DragEvent, index: number) {
+    if (!s?.dock.enabled) return;
+    dragIndex = index;
+    e.dataTransfer?.setData("text/plain", String(index));
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  }
+
+  function onOrderDragOver(e: DragEvent, index: number) {
+    if (dragIndex === null) return;
+    e.preventDefault(); // required to allow a drop
+    overIndex = index;
+  }
+
+  function onOrderDrop(e: DragEvent, index: number) {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === index) {
+      dragIndex = null;
+      overIndex = null;
+      return;
+    }
+    const arr = [...dockOrder];
+    const [moved] = arr.splice(dragIndex, 1);
+    arr.splice(index, 0, moved);
+    saveDock({ order: arr });
+    dragIndex = null;
+    overIndex = null;
+  }
+
+  function onOrderDragEnd() {
+    dragIndex = null;
+    overIndex = null;
+  }
+
+  function dockMemberName(id: string): string {
+    return services.find((x) => x.id === id)?.name ?? id;
+  }
 </script>
 
 <div class="win">
@@ -162,25 +229,90 @@
     {:else if loggedIn.length === 0}
       <div class="empty">{$t("widgetStyle.noServices")}</div>
     {:else}
-      {#if loggedIn.length > 1}
-        <div class="tabs" role="tablist">
-          {#each loggedIn as svc (svc.id)}
-            <button
-              class="tab"
-              class:active={activeService === svc.id}
-              role="tab"
-              aria-selected={activeService === svc.id}
-              onclick={() => (activeService = svc.id)}>{svc.name}</button>
-          {/each}
-        </div>
+      <div class="tabs" role="tablist">
+        {#each loggedIn as svc (svc.id)}
+          <button
+            class="tab"
+            class:active={activeService === svc.id}
+            role="tab"
+            aria-selected={activeService === svc.id}
+            onclick={() => (activeService = svc.id)}>{svc.name}</button>
+        {/each}
+        <button
+          class="tab"
+          class:active={activeService === LAYOUT_TAB}
+          role="tab"
+          aria-selected={activeService === LAYOUT_TAB}
+          onclick={() => (activeService = LAYOUT_TAB)}>{$t("dock.tabTitle")}</button>
+      </div>
+
+      {#if activeService === LAYOUT_TAB}
+        {@const dock = s.dock}
+        <section class="svc">
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={dock.enabled}
+              onchange={(e) => saveDock({ enabled: (e.target as HTMLInputElement).checked })} />
+            <span>{$t("dock.enable")}</span>
+          </label>
+
+          <div class="field">
+            <span class="flabel">{$t("dock.columns")}</span>
+            <div class="toggle">
+              <button
+                type="button"
+                class="tbtn"
+                disabled={!dock.enabled || dock.columns <= 1}
+                onclick={() => saveDock({ columns: Math.max(1, dock.columns - 1) })}>−</button>
+              <span class="stepperVal">{dock.columns}</span>
+              <button
+                type="button"
+                class="tbtn"
+                disabled={!dock.enabled || dock.columns >= 6}
+                onclick={() => saveDock({ columns: Math.min(6, dock.columns + 1) })}>＋</button>
+            </div>
+          </div>
+
+          <div class="field col">
+            <span class="flabel">{$t("dock.order")}</span>
+            {#each dockOrder as id, i (id)}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="orderRow"
+                class:dragging={dragIndex === i}
+                class:dropBefore={overIndex === i && dragIndex !== null && dragIndex > i}
+                class:dropAfter={overIndex === i && dragIndex !== null && dragIndex < i}
+                draggable={dock.enabled}
+                ondragstart={(e) => onOrderDragStart(e, i)}
+                ondragover={(e) => onOrderDragOver(e, i)}
+                ondrop={(e) => onOrderDrop(e, i)}
+                ondragend={onOrderDragEnd}>
+                <span class="grip" aria-hidden="true">⠿</span>
+                <span class="orderIcon">{@html iconFor(id)}</span>
+                <span class="orderName">{dockMemberName(id)}</span>
+              </div>
+            {/each}
+          </div>
+
+          <p class="hint">{$t("dock.hint")}</p>
+        </section>
       {/if}
 
       {#each loggedIn.filter((x) => x.id === activeService) as svc (svc.id)}
         {@const wc = widgetConfig(s, svc.id)}
+        {@const primaryOv = svc.id === "antigravity_ide" ? `${wc.headline_group}-5h` : null}
+        {@const secondaryOv = svc.id === "antigravity_ide" ? `${wc.headline_group}-weekly` : null}
         <section class="svc">
           <div class="previewWrap">
             <div class="previewPanel">
-              <WidgetStyle styleId={wc.style} snapshot={previewSnap(svc.id)} {now} displayMode={wc.display_mode} />
+              <WidgetStyle
+                styleId={wc.style}
+                snapshot={previewSnap(svc.id)}
+                {now}
+                displayMode={wc.display_mode}
+                primaryKeyOverride={primaryOv}
+                secondaryKeyOverride={secondaryOv} />
             </div>
           </div>
 
@@ -204,6 +336,28 @@
             </div>
           </div>
 
+          {#if svc.id === "antigravity_ide"}
+            <div class="field">
+              <span class="flabel">{$t("widgetStyle.headlineGroup")}</span>
+              <div class="toggle">
+                <button
+                  type="button"
+                  class="tbtn"
+                  class:active={wc.headline_group === "gemini"}
+                  onclick={() => updateWidget(svc.id, { headline_group: "gemini" })}>
+                  {$t("widgetStyle.groupGemini")}
+                </button>
+                <button
+                  type="button"
+                  class="tbtn"
+                  class:active={wc.headline_group === "3p"}
+                  onclick={() => updateWidget(svc.id, { headline_group: "3p" })}>
+                  {$t("widgetStyle.groupThirdParty")}
+                </button>
+              </div>
+            </div>
+          {/if}
+
           <div class="field col">
             <span class="flabel">{$t("widgetStyle.pickStyle")}</span>
             <div class="grid">
@@ -214,7 +368,13 @@
                   class:selected={wc.style === entry.id}
                   onclick={() => updateWidget(svc.id, { style: entry.id })}>
                   <div class="thumb">
-                    <WidgetStyle styleId={entry.id} snapshot={previewSnap(svc.id)} {now} displayMode={wc.display_mode} />
+                    <WidgetStyle
+                      styleId={entry.id}
+                      snapshot={previewSnap(svc.id)}
+                      {now}
+                      displayMode={wc.display_mode}
+                      primaryKeyOverride={primaryOv}
+                      secondaryKeyOverride={secondaryOv} />
                   </div>
                   <span class="cardlabel">{$t(entry.labelKey)}</span>
                 </button>
@@ -352,7 +512,15 @@
   }
   .toggle {
     display: flex;
+    align-items: center;
     gap: 6px;
+  }
+  .stepperVal {
+    min-width: 22px;
+    text-align: center;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
   .tbtn {
     padding: 5px 12px;
@@ -414,5 +582,47 @@
   }
   .check input {
     accent-color: rgb(var(--accent));
+  }
+  .orderRow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 4px;
+    border-bottom: 1px solid rgb(var(--border));
+    border-top: 2px solid transparent;
+    border-bottom-width: 1px;
+    cursor: grab;
+  }
+  .orderRow:last-child {
+    border-bottom: none;
+  }
+  .orderRow.dragging {
+    opacity: 0.4;
+  }
+  .orderRow.dropBefore {
+    border-top-color: rgb(var(--accent));
+  }
+  .orderRow.dropAfter {
+    border-bottom-color: rgb(var(--accent));
+    border-bottom-width: 2px;
+  }
+  .grip {
+    color: rgb(var(--fg-muted));
+    font-size: 0.9rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .orderIcon {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: rgb(var(--m1));
+  }
+  .orderName {
+    font-size: 0.82rem;
+  }
+  .hint {
+    margin: 0;
+    font-size: 0.76rem;
+    color: rgb(var(--fg-muted));
   }
 </style>

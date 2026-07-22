@@ -119,7 +119,11 @@ fn schedule_single_click(app: &AppHandle) {
 
 /// Build the tray tooltip across all services: a header per service, then up to two headline
 /// buckets each with remaining% and the time until reset.
-fn build_tooltip(map: &std::collections::HashMap<String, UsageSnapshot>, loc: &str) -> String {
+fn build_tooltip(
+    map: &std::collections::HashMap<String, UsageSnapshot>,
+    loc: &str,
+    settings: &crate::config::Settings,
+) -> String {
     let mut lines = Vec::new();
     for id in crate::service::all() {
         let Some(s) = map.get(*id) else { continue };
@@ -127,7 +131,27 @@ fn build_tooltip(map: &std::collections::HashMap<String, UsageSnapshot>, loc: &s
             continue;
         }
         lines.push(crate::service::display_name(id).to_string());
-        for b in s.buckets.iter().take(2) {
+        // Antigravity's snapshot always carries all four buckets (two model groups, fixed
+        // Gemini-first sort order - see antigravity.rs), so a plain "first two" would ignore
+        // the widget's own Gemini/3p headline toggle. Pick the buckets for whichever group
+        // the widget is set to show, so the tray tooltip and the widget agree.
+        let headline: Vec<&crate::api::Bucket> = if *id == crate::service::ANTIGRAVITY_IDE {
+            let prefix = if settings.widget(id).headline_group == "3p" {
+                "3p-"
+            } else {
+                "gemini-"
+            };
+            let picked: Vec<&crate::api::Bucket> =
+                s.buckets.iter().filter(|b| b.key.starts_with(prefix)).collect();
+            if picked.is_empty() {
+                s.buckets.iter().take(2).collect()
+            } else {
+                picked
+            }
+        } else {
+            s.buckets.iter().take(2).collect()
+        };
+        for b in headline {
             let label = i18n::bucket_label(loc, &b.key, &b.label);
             let cd = i18n::fmt_countdown(loc, &b.resets_at);
             lines.push(i18n::tooltip_line(loc, &label, b.remaining, &cd));
@@ -145,10 +169,10 @@ pub fn update_tray(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
-    let language = state.settings.lock().unwrap().language.clone();
-    let loc = i18n::effective_locale(&language);
+    let settings = state.settings.lock().unwrap().clone();
+    let loc = i18n::effective_locale(&settings.language);
     let map = state.last_snapshot.lock().unwrap().clone();
-    let tooltip = build_tooltip(&map, loc);
+    let tooltip = build_tooltip(&map, loc, &settings);
     let guard = state.tray.lock().unwrap();
     if let Some(t) = guard.as_ref() {
         let _ = t.set_tooltip(Some(&tooltip));

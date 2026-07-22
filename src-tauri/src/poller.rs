@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::api::{self, UsageSnapshot};
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::{service, tray, usage};
@@ -54,6 +55,26 @@ async fn poll_once(app: &AppHandle) {
                 );
                 tray::update_tray(app);
             }
+            Err(AppError::NotRunning) => {
+                // Antigravity IDE just isn't running right now - not a sign-out (the
+                // has_session marker stays put), only "temporarily unavailable". Routing
+                // through apply_snapshot keeps cache/history/tray/usage://updated consistent
+                // with every other status change instead of a bespoke code path.
+                let placeholder = UsageSnapshot {
+                    service_id: svc.clone(),
+                    five_hour: None,
+                    weekly_primary: None,
+                    primary_key: None,
+                    secondary_key: None,
+                    buckets: Vec::new(),
+                    organization_name: String::new(),
+                    account_email: String::new(),
+                    subscription: String::new(),
+                    fetched_at: api::now_iso(),
+                    status: "not_running".to_string(),
+                };
+                usage::apply_snapshot(app, placeholder);
+            }
             Err(e) => {
                 eprintln!("[cg] poll error ({svc}): {e}");
             }
@@ -74,6 +95,10 @@ pub fn start(app: &AppHandle) {
             loop {
                 tokio::time::sleep(Duration::from_secs(CHECK_STEP_SECS)).await;
                 waited += CHECK_STEP_SECS;
+                // Correct any dock drift every CHECK_STEP_SECS, independent of the (possibly
+                // much longer) usage refresh interval, so a docked group snaps back quickly.
+                let a = app.clone();
+                let _ = app.run_on_main_thread(move || crate::dock::watchdog_tick(&a));
                 if waited >= interval_secs(&app) {
                     break;
                 }

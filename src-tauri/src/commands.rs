@@ -1,7 +1,7 @@
 //! Tauri command handlers (IPC surface). Payloads are snake_case to match the
 //! TypeScript types in `src/lib/ipc.ts`.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -29,6 +29,10 @@ pub struct ServiceStatus {
     pub email: String,
     /// Plan / subscription (e.g. "Claude Max 20x", "Gemini Pro"), from the last usage snapshot.
     pub subscription: String,
+    /// The last snapshot's status ("ok" | "not_running" | "unauthorized" | ... ), or empty
+    /// before the first poll completes. `logged_in` is meaningless for a login-less service
+    /// like Antigravity (always true); this is what the Settings account row shows instead.
+    pub live_status: String,
 }
 
 #[tauri::command]
@@ -210,8 +214,9 @@ pub fn get_session_status(
 /// Login status + identity for every known service (logged-in or not).
 #[tauri::command]
 pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<ServiceStatus> {
-    // Snapshot each service's identity + plan, then drop the lock before touching settings.
-    let snap_info: std::collections::HashMap<String, (String, String, String)> = {
+    // Snapshot each service's identity + plan + live status, then drop the lock before
+    // touching settings.
+    let snap_info: std::collections::HashMap<String, (String, String, String, String)> = {
         let snaps = state.last_snapshot.lock().unwrap();
         snaps
             .iter()
@@ -222,6 +227,7 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
                         s.organization_name.clone(),
                         s.account_email.clone(),
                         s.subscription.clone(),
+                        s.status.clone(),
                     ),
                 )
             })
@@ -231,7 +237,7 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
         .iter()
         .map(|&id| {
             let logged_in = crate::service::has_session(&app, id);
-            let (snap_org, snap_email, subscription) =
+            let (snap_org, snap_email, subscription, live_status) =
                 snap_info.get(id).cloned().unwrap_or_default();
             // Claude's identity is persisted in settings (captured on login). Other services
             // (Gemini) carry theirs on the snapshot: the email is best-effort from the sign-in
@@ -250,13 +256,15 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
                 org_name,
                 email,
                 subscription,
+                live_status,
             }
         })
         .collect()
 }
 
-/// Open the login window for a service (Claude only for now: a remote, IPC-isolated
-/// claude.ai webview). Window creation is dispatched to the main thread (required on Windows).
+/// Open the login window for a service (Claude and Gemini only: Antigravity has no login at
+/// all, see `service::has_session`). Window creation is dispatched to the main thread
+/// (required on Windows).
 #[tauri::command]
 pub fn open_login_window(app: AppHandle, service: Option<String>) -> Result<(), String> {
     let service = crate::service::normalize(service.as_deref());
@@ -431,6 +439,62 @@ pub fn set_widget_visible(
     let service = crate::service::normalize(service.as_deref());
     windows::apply_widget_visible(&app, &service, visible);
     Ok(())
+}
+
+// --- widget grid docking ---
+
+/// Everything the Widget Style window's "Placement" tab can change. Deliberately excludes
+/// `anchor_x`/`anchor_y`: those are only ever written by `dock_move_to` (a live group drag),
+/// so a stale anchor cached in an open settings window can never be round-tripped back over
+/// a more recent drag through this command.
+#[derive(Deserialize)]
+pub struct DockConfigPatch {
+    pub enabled: bool,
+    pub columns: u32,
+    pub order: Vec<String>,
+}
+
+#[tauri::command]
+pub fn set_dock_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    patch: DockConfigPatch,
+) -> Result<(), String> {
+    let updated = {
+        let mut settings = state.settings.lock().unwrap();
+        settings.dock.enabled = patch.enabled;
+        settings.dock.columns = patch.columns.clamp(1, 12);
+        settings.dock.order = patch.order;
+        config::save(&app, &settings).map_err(|e| e.to_string())?;
+        settings.clone()
+    };
+    let _ = app.emit("settings://changed", &updated);
+    if updated.dock.enabled {
+        crate::dock::apply_layout(&app);
+    }
+    Ok(())
+}
+
+/// Live group-drag tick: `x`/`y` is where the dragged widget wants to be *now* (its physical
+/// position). No settings-changed broadcast here - this fires every animation frame while
+/// dragging and no other window renders the anchor, so broadcasting it would be pure waste.
+#[tauri::command]
+pub fn dock_move_to(app: AppHandle, service: String, x: i32, y: i32) {
+    crate::dock::move_group_to(&app, &service, x, y);
+}
+
+/// Called once when a group drag ends (pointerup/cancel), to persist the anchor `dock_move_to`
+/// intentionally left unsaved on every frame during the drag itself.
+#[tauri::command]
+pub fn dock_move_end(app: AppHandle) {
+    crate::dock::move_group_end(&app);
+}
+
+/// Ask the dock layout to re-run now (e.g. after a widget's content resized). A no-op when
+/// docking is off.
+#[tauri::command]
+pub fn dock_relayout(app: AppHandle) {
+    crate::dock::apply_layout(&app);
 }
 
 // --- theme / locale ---

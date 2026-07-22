@@ -7,6 +7,8 @@ pub enum AppError {
     Unauthorized,
     #[error("not signed in")]
     NoSession,
+    #[error("Antigravity IDE not running")]
+    NotRunning,
     #[error("network error: {0}")]
     Http(String),
     #[error("unexpected response: {0}")]

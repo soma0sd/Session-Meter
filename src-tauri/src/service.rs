@@ -10,8 +10,19 @@ use crate::error::AppError;
 
 pub const CLAUDE: &str = "claude";
 pub const GEMINI: &str = "gemini";
+/// Antigravity IDE's local quota API (see `antigravity.rs`) - unrelated to the "Antigravity"
+/// name that used to refer to this app's Gemini service before the 0.4.1 rename; deliberately
+/// NOT reusing that id (see `config::migrate_service_rename`'s doc comment).
+pub const ANTIGRAVITY_IDE: &str = "antigravity_ide";
 
-/// All known service ids, in display order.
+/// All known service ids, in display order. Antigravity IDE detection is Windows-only for
+/// now (see `antigravity.rs`), so it is left out of the registry entirely on other
+/// platforms rather than exposing a service nothing there can ever sign into.
+#[cfg(windows)]
+pub fn all() -> &'static [&'static str] {
+    &[CLAUDE, GEMINI, ANTIGRAVITY_IDE]
+}
+#[cfg(not(windows))]
 pub fn all() -> &'static [&'static str] {
     &[CLAUDE, GEMINI]
 }
@@ -21,6 +32,7 @@ pub fn display_name(id: &str) -> &'static str {
     match id {
         CLAUDE => "Claude",
         GEMINI => "Gemini",
+        ANTIGRAVITY_IDE => "Antigravity",
         _ => "Unknown",
     }
 }
@@ -30,12 +42,19 @@ pub fn display_name(id: &str) -> &'static str {
 pub fn normalize(id: Option<&str>) -> String {
     match id {
         Some(GEMINI) => GEMINI.to_string(),
+        Some(ANTIGRAVITY_IDE) => ANTIGRAVITY_IDE.to_string(),
         _ => CLAUDE.to_string(),
     }
 }
 
-/// True if the service currently has a stored credential (is "logged in").
+/// True if the service currently has a stored credential (is "logged in"). Antigravity has no
+/// login at all: it is always considered "on", and whether the IDE is actually reachable right
+/// now is judged fresh on every poll instead (see `antigravity::fetch` / `AppError::NotRunning`).
+/// This is what makes its widget appear automatically, the same way Claude's does before sign-in.
 pub fn has_session(app: &AppHandle, service: &str) -> bool {
+    if service == ANTIGRAVITY_IDE {
+        return true;
+    }
     match crate::config::load_cookie(app, service) {
         // Gemini now stores a Google cookie header, not the old OAuth-token JSON; treat
         // a leftover OAuth blob (starts with '{') as signed-out so a fresh cookie login runs.
@@ -67,6 +86,7 @@ pub async fn fetch(
             crate::api::fetch_usage(client, &cookie).await
         }
         GEMINI => crate::gemini::fetch(app, client).await,
+        ANTIGRAVITY_IDE => crate::antigravity::fetch(app, client).await,
         other => Err(AppError::Other(format!("unknown service: {other}"))),
     }
 }

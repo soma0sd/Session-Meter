@@ -17,7 +17,7 @@ export interface Bucket {
   resets_at: string;
 }
 
-export type UsageStatus = "ok" | "unauthorized" | "error";
+export type UsageStatus = "ok" | "unauthorized" | "not_running" | "error";
 
 export interface UsageSnapshot {
   service_id: string;
@@ -53,6 +53,28 @@ export interface WidgetConfig {
   always_on_top: boolean;
   move_lock: boolean;
   visible: boolean;
+  /** Antigravity-only: which model-group bucket pair ("gemini" | "3p") the widget/tray
+   *  headline shows. Ignored by every other service. */
+  headline_group: "gemini" | "3p";
+}
+
+/** Widget grid docking: several widgets snapped into a grid that move together. See the
+ *  Widget Style window's Placement tab. */
+export interface DockConfig {
+  enabled: boolean;
+  columns: number;
+  /** Service ids in row-major placement order. */
+  order: string[];
+  anchor_x: number;
+  anchor_y: number;
+}
+
+/** Everything `setDockConfig` can change - deliberately excludes the anchor, which only
+ *  `dockMoveTo` (a live group drag) may write. */
+export interface DockConfigPatch {
+  enabled: boolean;
+  columns: number;
+  order: string[];
 }
 
 export interface Settings {
@@ -65,6 +87,7 @@ export interface Settings {
   history_retention_days: number;
   org_name: string;
   account_email: string;
+  dock: DockConfig;
 }
 
 /** WidgetConfig with defaults applied for a service missing from the map. */
@@ -77,6 +100,7 @@ export function widgetConfig(s: Settings, service: string): WidgetConfig {
       always_on_top: true,
       move_lock: false,
       visible: true,
+      headline_group: "gemini",
     }
   );
 }
@@ -95,6 +119,9 @@ export interface ServiceStatus {
   email: string;
   /** Plan / subscription (e.g. "Claude Max 20x", "Gemini Pro"). */
   subscription: string;
+  /** Last snapshot's status ("ok" | "not_running" | "unauthorized" | ""), for services (like
+   *  Antigravity) where `logged_in` alone doesn't say whether it's currently reachable. */
+  live_status: string;
 }
 
 export interface UpdateInfo {
@@ -142,6 +169,27 @@ function mockUsage(service?: string): UsageSnapshot {
       status: "ok",
     };
   }
+  if (service === "antigravity_ide") {
+    const buckets = [
+      b("gemini-5h", "Gemini 5-hour", 85, 3 * 3600_000),
+      b("gemini-weekly", "Gemini weekly", 98, 5 * 86_400_000),
+      b("3p-5h", "Claude/GPT 5-hour", 100, 3 * 3600_000),
+      b("3p-weekly", "Claude/GPT weekly", 67, 5 * 86_400_000),
+    ];
+    return {
+      service_id: "antigravity_ide",
+      five_hour: { remaining: 85, utilization: 15, resets_at: buckets[0].resets_at },
+      weekly_primary: { remaining: 98, utilization: 2, resets_at: buckets[1].resets_at },
+      primary_key: "gemini-5h",
+      secondary_key: "gemini-weekly",
+      buckets,
+      organization_name: "",
+      account_email: "",
+      subscription: "",
+      fetched_at: iso(0),
+      status: "ok",
+    };
+  }
   const buckets = [
     b("five_hour", "5-hour session", 62, 2 * 3600_000),
     b("seven_day", "Weekly (7 days)", 88, 4 * 86_400_000),
@@ -174,12 +222,14 @@ function mockSettings(): Settings {
         always_on_top: true,
         move_lock: false,
         visible: true,
+        headline_group: "gemini",
       },
     },
     notify: { enabled: true, session_threshold: 80, weekly_threshold: 80, on_reset: true },
     history_retention_days: 30,
     org_name: "Preview Org",
     account_email: "you@example.com",
+    dock: { enabled: false, columns: 2, order: [], anchor_x: 0, anchor_y: 0 },
   };
 }
 function mockHistory(): HistoryPoint[] {
@@ -219,8 +269,9 @@ export const getSessionStatus = (service?: string) =>
   }));
 export const getServicesStatus = () =>
   call<ServiceStatus[]>("get_services_status", undefined, () => [
-    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Max 20x" },
-    { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@gmail.com", subscription: "Gemini Pro" },
+    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Max 20x", live_status: "ok" },
+    { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@gmail.com", subscription: "Gemini Pro", live_status: "ok" },
+    { id: "antigravity_ide", name: "Antigravity", logged_in: true, org_name: "", email: "", subscription: "", live_status: "ok" },
   ]);
 export const openLoginWindow = (service?: string) =>
   call<void>("open_login_window", { service }, () => undefined);
@@ -247,6 +298,14 @@ export const setWidgetOpacity = (service: string, alpha: number) =>
   call<void>("set_widget_opacity", { service, alpha }, () => undefined);
 export const setWidgetVisible = (service: string, visible: boolean) =>
   call<void>("set_widget_visible", { service, visible }, () => undefined);
+
+// --- widget grid docking ---
+export const setDockConfig = (patch: DockConfigPatch) =>
+  call<void>("set_dock_config", { patch }, () => undefined);
+export const dockMoveTo = (service: string, x: number, y: number) =>
+  call<void>("dock_move_to", { service, x, y }, () => undefined);
+export const dockMoveEnd = () => call<void>("dock_move_end", undefined, () => undefined);
+export const dockRelayout = () => call<void>("dock_relayout", undefined, () => undefined);
 
 // --- system ---
 export const setAutostart = (enabled: boolean) =>

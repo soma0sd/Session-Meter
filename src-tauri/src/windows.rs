@@ -157,8 +157,12 @@ pub fn create_widget_window(app: &AppHandle, service: &str) {
 
 /// Restore a service's widget to its saved position, or bottom-right on first use (or whenever
 /// the saved position is off-screen, self-healing a stale/sentinel value so the widget never
-/// comes back invisible).
+/// comes back invisible). A docked widget is never placed individually - `dock::apply_layout`
+/// owns its position - so this returns immediately for one.
 fn place_widget(app: &AppHandle, win: &tauri::WebviewWindow, service: &str) {
+    if crate::dock::is_docked(app, service) {
+        return;
+    }
     match config::load_widget_pos(app, service).filter(|&(x, y)| pos_on_screen(win, x, y)) {
         Some((x, y)) => {
             let _ = win.set_position(PhysicalPosition::new(x, y));
@@ -256,6 +260,9 @@ pub fn apply_widget_visible(app: &AppHandle, service: &str, visible: bool) {
             let _ = win.hide();
         }
     }
+    // Hiding/showing a docked member changes who `pack()` sees, so the rest of the group
+    // needs to re-flow around the gap (or make room again).
+    crate::dock::apply_layout(app);
 }
 
 /// Show each service's widget on startup, unless the user had it hidden.
@@ -264,6 +271,7 @@ pub fn show_widget(app: &AppHandle) {
         if svc != "claude" {
             create_widget_window(app, &svc);
         }
+        crate::dock::on_membership_changed(app, &svc);
         if !widget_should_show(app, &svc) {
             continue;
         }
@@ -273,6 +281,16 @@ pub fn show_widget(app: &AppHandle) {
             }
             let _ = win.show();
         }
+    }
+    crate::dock::apply_layout(app);
+    // Re-push settings right after showing, in case a widget's own startup `getSettings()`
+    // call raced ahead of `AppState` being managed (the static "widget" window's webview can
+    // begin executing JS before `setup()` finishes) and so applied stale/default values. This
+    // costs nothing when there was no race - `applySettings` is idempotent - but guarantees
+    // every widget converges on the real persisted style shortly after launch either way.
+    if let Some(state) = app.try_state::<AppState>() {
+        let settings = state.settings.lock().unwrap().clone();
+        let _ = app.emit("settings://changed", &settings);
     }
 }
 
@@ -289,6 +307,7 @@ pub fn toggle_widget(app: &AppHandle) {
         if svc != "claude" {
             create_widget_window(app, svc);
         }
+        crate::dock::on_membership_changed(app, svc);
         if let Some(win) = app.get_webview_window(&widget_label(svc)) {
             if any_hidden {
                 place_widget(app, &win, svc);
@@ -301,6 +320,7 @@ pub fn toggle_widget(app: &AppHandle) {
             set_widget_visible(app, svc, any_hidden);
         }
     }
+    crate::dock::apply_layout(app);
 }
 
 /// Keep each service widget's actual state in sync with its desired visibility, recovering if
@@ -326,6 +346,7 @@ pub fn reconcile_widget_visibility(app: &AppHandle) {
             let _ = win.hide();
         }
     }
+    crate::dock::apply_layout(app);
 }
 
 /// Position and show the custom context menu near the tray click point.

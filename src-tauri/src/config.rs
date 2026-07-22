@@ -69,6 +69,10 @@ pub struct WidgetConfig {
     pub always_on_top: bool,
     pub move_lock: bool,
     pub visible: bool, // desired widget visibility (a watchdog keeps the window in sync)
+    /// Antigravity-only: which model-group bucket pair ("gemini" | "3p") the widget/tray
+    /// headline shows. Ignored by every other service. The snapshot itself always carries
+    /// all four buckets; this only picks which pair is the "primary" one shown up front.
+    pub headline_group: String,
 }
 
 impl Default for WidgetConfig {
@@ -80,6 +84,35 @@ impl Default for WidgetConfig {
             always_on_top: true,
             move_lock: false,
             visible: true,
+            headline_group: "gemini".to_string(),
+        }
+    }
+}
+
+/// Widget grid docking: several widgets snapped into a grid that move together when any one
+/// of them is dragged. See `dock.rs` for the layout engine. `anchor_x`/`anchor_y` are NOT
+/// serialized here in practice - `load`/`save` overlay them from `window.json` (see
+/// `save_dock_anchor`/`load_dock_anchor`) so a group drag never rewrites the whole settings
+/// file. They stay on this struct so callers have one place to read the full config from.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct DockConfig {
+    pub enabled: bool,
+    pub columns: u32,
+    /// Service ids in row-major placement order.
+    pub order: Vec<String>,
+    pub anchor_x: i32,
+    pub anchor_y: i32,
+}
+
+impl Default for DockConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            columns: 2,
+            order: Vec::new(),
+            anchor_x: 0,
+            anchor_y: 0,
         }
     }
 }
@@ -96,6 +129,7 @@ pub struct Settings {
     pub history_retention_days: u32,
     pub org_name: String,
     pub account_email: String,
+    pub dock: DockConfig,
 }
 
 impl Default for Settings {
@@ -109,6 +143,7 @@ impl Default for Settings {
             history_retention_days: 30,
             org_name: String::new(),
             account_email: String::new(),
+            dock: DockConfig::default(),
         }
     }
 }
@@ -189,6 +224,13 @@ pub fn load(app: &AppHandle) -> Settings {
             // the upgraded settings locks the current format in.
             if was_legacy || seeded {
                 let _ = save(app, &s);
+            }
+            // The dock anchor lives in window.json (churns every drag frame, like the widget
+            // positions), not settings.json: overlay it over whatever `dock.anchor_*` this file
+            // happened to carry so a group drag never needs to rewrite the whole settings file.
+            if let Some((x, y)) = load_dock_anchor(app) {
+                s.dock.anchor_x = x;
+                s.dock.anchor_y = y;
             }
             s
         }
@@ -287,6 +329,33 @@ pub fn save_widget_pos(app: &AppHandle, service: &str, x: i32, y: i32) {
         v = serde_json::json!({});
     }
     v[service] = serde_json::json!({ "x": x, "y": y });
+    let _ = write_json_atomic(&path, &v);
+}
+
+// --- dock group anchor (its own key in window.json, same rationale as widget positions:
+// a group drag updates this every frame, and it must never share a file with settings.json) ---
+
+/// Reserved key: cannot collide with a service id (service ids never contain "__").
+const DOCK_ANCHOR_KEY: &str = "__dock__";
+
+pub fn load_dock_anchor(app: &AppHandle) -> Option<(i32, i32)> {
+    let v: serde_json::Value = read_json_file(&data_dir(app)?.join(WINDOW_FILE))?;
+    let node = v.get(DOCK_ANCHOR_KEY)?;
+    let x = node.get("x")?.as_i64()? as i32;
+    let y = node.get("y")?.as_i64()? as i32;
+    Some((x, y))
+}
+
+pub fn save_dock_anchor(app: &AppHandle, x: i32, y: i32) {
+    let Some(dir) = data_dir(app) else {
+        return;
+    };
+    let path = dir.join(WINDOW_FILE);
+    let mut v = read_json_file::<serde_json::Value>(&path).unwrap_or_else(|| serde_json::json!({}));
+    if !v.is_object() {
+        v = serde_json::json!({});
+    }
+    v[DOCK_ANCHOR_KEY] = serde_json::json!({ "x": x, "y": y });
     let _ = write_json_atomic(&path, &v);
 }
 
@@ -493,6 +562,15 @@ mod settings_tests {
         let w = s.widgets.get("claude").expect("claude widget seeded");
         assert_eq!(w.style, "focus-slim-compact", "widget_layout=compact -> focus-slim-compact");
         assert!((w.opacity - 0.7).abs() < 1e-9, "opacity carried from legacy");
+    }
+
+    #[test]
+    fn legacy_json_yields_default_dock() {
+        // A pre-0.5 settings.json has no "dock" key at all; #[serde(default)] must fill it in.
+        let s = parse_and_migrate(LEGACY);
+        assert!(!s.dock.enabled, "dock defaults to disabled");
+        assert_eq!(s.dock.columns, 2, "dock defaults to 2 columns");
+        assert!(s.dock.order.is_empty(), "dock defaults to an empty order");
     }
 
     #[test]

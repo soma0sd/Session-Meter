@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [0.5] - 2026-07-22
+
+### Added
+
+- **Widget grid docking**: a new "Placement" tab in the Widget style window lets you snap several
+  widgets into a grid; dragging any docked widget moves the whole group together. Column count and
+  placement order are configurable.
+- **Antigravity IDE quota widget**: a third monitored service tracking Antigravity IDE's (local
+  language_server API) coding quota. No sign-in required — enabling it detects the running IDE.
+  Shows 5-hour/weekly usage for both the Gemini model group and the Claude/GPT model group, with a
+  toggle for which one the widget headlines. Unofficial API, Windows-only.
+
 ## [0.4] - 2026-07-22
 
 ### Added

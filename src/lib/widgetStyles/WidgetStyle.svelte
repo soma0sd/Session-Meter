@@ -15,11 +15,18 @@
     snapshot,
     now,
     displayMode,
+    primaryKeyOverride = null,
+    secondaryKeyOverride = null,
   }: {
     styleId: string;
     snapshot: UsageSnapshot;
     now: number;
     displayMode: DisplayMode;
+    /** Antigravity-only: show this bucket pair instead of the snapshot's own headline
+     *  (five_hour/weekly_primary). Every other caller omits these and gets the default
+     *  behavior unchanged. */
+    primaryKeyOverride?: string | null;
+    secondaryKeyOverride?: string | null;
   } = $props();
 
   const components = {
@@ -41,8 +48,14 @@
     return b?.label ?? k;
   }
 
-  const primary = $derived(snapshot.five_hour);
-  const secondary = $derived(snapshot.weekly_primary);
+  const primary = $derived(
+    (primaryKeyOverride ? snapshot.buckets.find((b) => b.key === primaryKeyOverride) : undefined) ??
+      snapshot.five_hour,
+  );
+  const secondary = $derived(
+    (secondaryKeyOverride ? snapshot.buckets.find((b) => b.key === secondaryKeyOverride) : undefined) ??
+      snapshot.weekly_primary,
+  );
   const primaryPct = $derived(primary ? primary.utilization : 0);
   const secondaryPct = $derived(secondary ? secondary.utilization : 0);
   const primaryResetMs = $derived(
@@ -51,8 +64,10 @@
   const secondaryResetMs = $derived(
     secondary ? Math.max(0, Date.parse(secondary.resets_at) - now) : 0,
   );
-  const primaryLabel = $derived(windowLabel(snapshot.primary_key, "five_hour"));
-  const secondaryLabel = $derived(windowLabel(snapshot.secondary_key, "seven_day"));
+  const primaryLabel = $derived(windowLabel(primaryKeyOverride ?? snapshot.primary_key, "five_hour"));
+  const secondaryLabel = $derived(
+    windowLabel(secondaryKeyOverride ?? snapshot.secondary_key, "seven_day"),
+  );
 </script>
 
 <Comp
