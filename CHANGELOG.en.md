@@ -12,9 +12,9 @@ All notable changes to this project are documented here. The format is based on
   widgets into a grid; dragging any docked widget moves the whole group together. Column count and
   placement order are configurable.
 - **Antigravity IDE quota widget**: a third monitored service tracking Antigravity IDE's (local
-  language_server API) coding quota. No sign-in required — enabling it detects the running IDE.
-  Shows 5-hour/weekly usage for both the Gemini model group and the Claude/GPT model group, with a
-  toggle for which one the widget headlines. Unofficial API, Windows-only.
+  language_server API) coding quota. No sign-in required: it automatically detects the running
+  IDE. Shows 5-hour/weekly usage for both the Gemini model group and the Claude/GPT model group,
+  with a toggle for which one the widget headlines. Unofficial API, Windows-only.
 
 ## [0.4] - 2026-07-22
 
@@ -24,7 +24,7 @@ All notable changes to this project are documented here. The format is based on
   (Gemini subscription)** usage. Sign-in happens in a dedicated window running in a separate
   process, so a problem loading the sign-in page can't affect the rest of the app. There is no
   official API, so this relies on screen scraping and is offered as experimental.
-- **Widget style window**: pick, **per service**, from 10 styles — five graphic concepts
+- **Widget style window**: pick, **per service**, from 10 styles: five graphic concepts
   (horizontal bars, concentric rings, dual semi-arc, vertical pillars, hex rings), each in a
   detailed or compact variant. Includes a live preview and a remaining/used display toggle.
 - **Per-service widgets**: each signed-in service gets its own widget window, with the service
