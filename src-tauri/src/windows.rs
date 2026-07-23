@@ -159,34 +159,131 @@ pub fn create_widget_window(app: &AppHandle, service: &str) {
 /// the saved position is off-screen, self-healing a stale/sentinel value so the widget never
 /// comes back invisible). A docked widget is never placed individually - `dock::apply_layout`
 /// owns its position - so this returns immediately for one.
+/// Restore a service's widget to its saved position, or bottom-right on first use (or whenever
+/// the saved position is off-screen, self-healing a stale/sentinel value so the widget never
+/// comes back invisible). A docked widget is never placed individually - `dock::apply_layout`
+/// owns its position - so this returns immediately for one.
 fn place_widget(app: &AppHandle, win: &tauri::WebviewWindow, service: &str) {
     if crate::dock::is_docked(app, service) {
         return;
     }
-    match config::load_widget_pos(app, service).filter(|&(x, y)| pos_on_screen(win, x, y)) {
+    let (w, h) = win
+        .outer_size()
+        .map(|s| (s.width as i32, s.height as i32))
+        .unwrap_or((252, 150));
+
+    match config::load_widget_pos(app, service) {
         Some((x, y)) => {
-            let _ = win.set_position(PhysicalPosition::new(x, y));
+            let (nx, ny, _moved) = clamp_rect_to_screen(win, x, y, w, h);
+            let _ = win.set_position(PhysicalPosition::new(nx, ny));
+            if (nx, ny) != (x, y) {
+                config::save_widget_pos(app, service, nx, ny);
+            }
         }
         None => {
             let _ = win.move_window(Position::BottomRight);
+            if let Ok(pos) = win.outer_position() {
+                let (nx, ny, _moved) = clamp_rect_to_screen(win, pos.x, pos.y, w, h);
+                let _ = win.set_position(PhysicalPosition::new(nx, ny));
+                config::save_widget_pos(app, service, nx, ny);
+            }
         }
     }
 }
 
-/// True if (x, y) lands inside a connected monitor. Rejects the Win32 minimized sentinel
-/// (-32000) and any position on a since-disconnected display.
-fn pos_on_screen(win: &tauri::WebviewWindow, x: i32, y: i32) -> bool {
+/// Clamps a rectangle (x, y, w, h) so that it is fully contained inside the best-matching monitor.
+/// Returns `(clamped_x, clamped_y, moved)` where `moved` is true if the rectangle was partially or
+/// fully outside the display bounds and had to be adjusted.
+pub fn clamp_rect_to_screen(win: &tauri::WebviewWindow, x: i32, y: i32, w: i32, h: i32) -> (i32, i32, bool) {
     if x <= -32000 || y <= -32000 {
-        return false;
+        if let Ok(Some(mon)) = win.primary_monitor() {
+            let p = mon.position();
+            let s = mon.size();
+            let target_x = p.x + (s.width as i32 - w).max(0);
+            let target_y = p.y + (s.height as i32 - h).max(0);
+            return (target_x, target_y, true);
+        }
     }
+
     let Ok(mons) = win.available_monitors() else {
-        return false;
+        return (x, y, false);
     };
-    mons.iter().any(|m| {
-        let p = m.position();
-        let s = m.size();
-        x >= p.x && y >= p.y && x < p.x + s.width as i32 && y < p.y + s.height as i32
-    })
+    if mons.is_empty() {
+        return (x, y, false);
+    }
+
+    let primary_mon = win.primary_monitor().ok().flatten();
+    let cx = x + w / 2;
+    let cy = y + h / 2;
+    let mon = mons
+        .iter()
+        .find(|m| {
+            let p = m.position();
+            let s = m.size();
+            cx >= p.x && cy >= p.y && cx < p.x + s.width as i32 && cy < p.y + s.height as i32
+        })
+        .or_else(|| {
+            mons.iter().max_by_key(|m| {
+                let p = m.position();
+                let s = m.size();
+                let mw = s.width as i32;
+                let mh = s.height as i32;
+                let overlap_w = (x + w).min(p.x + mw) - x.max(p.x);
+                let overlap_h = (y + h).min(p.y + mh) - y.max(p.y);
+                if overlap_w > 0 && overlap_h > 0 {
+                    overlap_w * overlap_h
+                } else {
+                    0
+                }
+            })
+        })
+        .or(primary_mon.as_ref())
+        .or(mons.first());
+
+    let Some(mon) = mon else {
+        return (x, y, false);
+    };
+
+    let p = mon.position();
+    let s = mon.size();
+    let mw = s.width as i32;
+    let mh = s.height as i32;
+
+    let is_fully_contained = x >= p.x && y >= p.y && (x + w) <= (p.x + mw) && (y + h) <= (p.y + mh);
+
+    if is_fully_contained {
+        (x, y, false)
+    } else {
+        let clamped_x = if w >= mw { p.x } else { x.clamp(p.x, p.x + mw - w) };
+        let clamped_y = if h >= mh { p.y } else { y.clamp(p.y, p.y + mh - h) };
+        (clamped_x, clamped_y, true)
+    }
+}
+
+/// Ensure the specified widget is fully inside screen bounds. Moves it inside if any part is outside.
+pub fn ensure_widget_on_screen(app: &AppHandle, service: &str) {
+    if crate::dock::is_docked(app, service) {
+        return;
+    }
+    let Some(win) = app.get_webview_window(&widget_label(service)) else {
+        return;
+    };
+    if matches!(win.is_minimized(), Ok(true)) {
+        return;
+    }
+    let Ok(pos) = win.outer_position() else {
+        return;
+    };
+    let (w, h) = win
+        .outer_size()
+        .map(|s| (s.width as i32, s.height as i32))
+        .unwrap_or((252, 150));
+
+    let (nx, ny, moved) = clamp_rect_to_screen(&win, pos.x, pos.y, w, h);
+    if moved {
+        let _ = win.set_position(PhysicalPosition::new(nx, ny));
+        config::save_widget_pos(app, service, nx, ny);
+    }
 }
 
 /// Persist a service widget's current on-screen position. Windows parks a minimizing/hiding
@@ -334,13 +431,11 @@ pub fn reconcile_widget_visibility(app: &AppHandle) {
             continue;
         };
         if widget_should_show(app, &svc) {
-            let on_screen = win
-                .outer_position()
-                .map(|p| pos_on_screen(&win, p.x, p.y))
-                .unwrap_or(false);
-            if !matches!(win.is_visible(), Ok(true)) || !on_screen {
+            if !matches!(win.is_visible(), Ok(true)) {
                 place_widget(app, &win, &svc);
                 let _ = win.show();
+            } else {
+                ensure_widget_on_screen(app, &svc);
             }
         } else if matches!(win.is_visible(), Ok(true)) {
             let _ = win.hide();

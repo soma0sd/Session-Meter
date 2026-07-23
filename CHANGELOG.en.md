@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [0.5.1] - 2026-07-23
+
+### Fixed
+
+- **Simplified tray popup**: Cleaned up the tray icon hover popup to display only the application name and version.
+- **Automatic widget screen-edge clamping**: Automatically detects when any part of a widget (standalone or docked) is outside display bounds and repositions it inside the screen.
+
 ## [0.5] - 2026-07-22
 
 ### Added

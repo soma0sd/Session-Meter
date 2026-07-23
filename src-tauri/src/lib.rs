@@ -123,10 +123,6 @@ pub fn run() {
             WindowEvent::Moved(pos)
                 if windows::service_from_widget_label(window.label()).is_some() =>
             {
-                // Windows parks a minimizing/hiding window at (-32000,-32000) and still
-                // reports is_visible()==true, so also reject the sentinel and the minimized
-                // state before persisting; otherwise a hide/minimize (e.g. during an update
-                // restart) saves that bogus position and the widget returns off-screen.
                 if pos.x > -32000
                     && pos.y > -32000
                     && matches!(window.is_visible(), Ok(true))
@@ -139,13 +135,11 @@ pub fn run() {
                                 .try_state::<AppState>()
                                 .map(|s| s.dock_relayout_in_progress.load(Ordering::SeqCst))
                                 .unwrap_or(false);
-                            // If a relayout is mid-flight, this Moved is our own echo of it -
-                            // ignore outright rather than double-handling it in on_widget_moved.
                             if !in_progress {
                                 dock::on_widget_moved(app, &service, pos.x, pos.y);
                             }
                         } else {
-                            config::save_widget_pos(app, &service, pos.x, pos.y);
+                            windows::ensure_widget_on_screen(app, &service);
                         }
                     }
                 }

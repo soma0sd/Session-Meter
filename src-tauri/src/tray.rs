@@ -9,9 +9,8 @@ use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::api::UsageSnapshot;
 use crate::state::AppState;
-use crate::{i18n, windows};
+use crate::windows;
 
 /// A left Click arriving this soon after a DoubleClick is the trailing Click that Windows
 /// emits for a double-click (order: Click, DoubleClick, Click); it must not schedule a toggle.
@@ -51,9 +50,10 @@ fn app_icon() -> Image<'static> {
 }
 
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let tooltip = format!("SessionMeter v{}", app.package_info().version);
     let tray = TrayIconBuilder::with_id("main")
         .icon(app_icon())
-        .tooltip("SessionMeter")
+        .tooltip(&tooltip)
         .on_tray_icon_event(handle_tray_event)
         .build(app)?;
     if let Some(state) = app.try_state::<AppState>() {
@@ -117,64 +117,7 @@ fn schedule_single_click(app: &AppHandle) {
     });
 }
 
-/// Build the tray tooltip across all services: a header per service, then up to two headline
-/// buckets each with remaining% and the time until reset.
-fn build_tooltip(
-    map: &std::collections::HashMap<String, UsageSnapshot>,
-    loc: &str,
-    settings: &crate::config::Settings,
-) -> String {
-    let mut lines = Vec::new();
-    for id in crate::service::all() {
-        let Some(s) = map.get(*id) else { continue };
-        if s.status != "ok" {
-            continue;
-        }
-        lines.push(crate::service::display_name(id).to_string());
-        // Antigravity's snapshot always carries all four buckets (two model groups, fixed
-        // Gemini-first sort order - see antigravity.rs), so a plain "first two" would ignore
-        // the widget's own Gemini/3p headline toggle. Pick the buckets for whichever group
-        // the widget is set to show, so the tray tooltip and the widget agree.
-        let headline: Vec<&crate::api::Bucket> = if *id == crate::service::ANTIGRAVITY_IDE {
-            let prefix = if settings.widget(id).headline_group == "3p" {
-                "3p-"
-            } else {
-                "gemini-"
-            };
-            let picked: Vec<&crate::api::Bucket> =
-                s.buckets.iter().filter(|b| b.key.starts_with(prefix)).collect();
-            if picked.is_empty() {
-                s.buckets.iter().take(2).collect()
-            } else {
-                picked
-            }
-        } else {
-            s.buckets.iter().take(2).collect()
-        };
-        for b in headline {
-            let label = i18n::bucket_label(loc, &b.key, &b.label);
-            let cd = i18n::fmt_countdown(loc, &b.resets_at);
-            lines.push(i18n::tooltip_line(loc, &label, b.remaining, &cd));
-        }
-    }
-    if lines.is_empty() {
-        i18n::tooltip_signed_out(loc).to_string()
-    } else {
-        lines.join("\n")
-    }
-}
-
-/// Refresh the tray tooltip from the latest snapshots (the icon stays the fixed app icon).
-pub fn update_tray(app: &AppHandle) {
-    let Some(state) = app.try_state::<AppState>() else {
-        return;
-    };
-    let settings = state.settings.lock().unwrap().clone();
-    let loc = i18n::effective_locale(&settings.language);
-    let map = state.last_snapshot.lock().unwrap().clone();
-    let tooltip = build_tooltip(&map, loc, &settings);
-    let guard = state.tray.lock().unwrap();
-    if let Some(t) = guard.as_ref() {
-        let _ = t.set_tooltip(Some(&tooltip));
-    }
+/// Refresh the tray tooltip (kept fixed to app name and version).
+pub fn update_tray(_app: &AppHandle) {
+    // Tray tooltip only displays app name and version.
 }

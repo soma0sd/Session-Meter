@@ -18,6 +18,7 @@ pub fn effective_locale(language: &str) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
     match (loc, key) {
         ("ko", "five_hour") => "이번 세션".to_string(),
@@ -30,6 +31,7 @@ pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
 
 /// Short "time until reset" from an ISO-8601 timestamp (e.g. "4d 12h" / "2시간 45분").
 /// Empty when the timestamp is missing/unparseable.
+#[allow(dead_code)]
 pub fn fmt_countdown(loc: &str, resets_at: &str) -> String {
     let Some(target) = crate::history::parse_iso(resets_at) else {
         return String::new();
@@ -58,6 +60,7 @@ pub fn fmt_countdown(loc: &str, resets_at: &str) -> String {
 }
 
 /// One tray-tooltip bucket line: "  Current session: 62% left · resets in 1h 59m".
+#[allow(dead_code)]
 pub fn tooltip_line(loc: &str, label: &str, remaining: u8, countdown: &str) -> String {
     let base = if loc == "ko" {
         format!("  {label}: {remaining}% 남음")
@@ -73,6 +76,7 @@ pub fn tooltip_line(loc: &str, label: &str, remaining: u8, countdown: &str) -> S
     }
 }
 
+#[allow(dead_code)]
 pub fn tooltip_signed_out(loc: &str) -> &'static str {
     if loc == "ko" {
         "SessionMeter - 로그인 필요"

@@ -1,6 +1,6 @@
 {
   "name": "sessionmeter",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Claude and Gemini usage tray, widget, and stats for the desktop",
   "type": "module",
   "license": "MIT",

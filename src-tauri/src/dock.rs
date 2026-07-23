@@ -130,19 +130,45 @@ pub fn apply_layout(app: &AppHandle) {
     }
     let _guard = RelayoutGuard(&state.dock_relayout_in_progress);
 
-    let cfg = state.settings.lock().unwrap().dock.clone();
+    let mut cfg = state.settings.lock().unwrap().dock.clone();
     if !cfg.enabled {
         return;
     }
     let members = active_members(app, &cfg);
+    if members.is_empty() {
+        return;
+    }
+
+    if let Some(ref_win) = app.get_webview_window(&widget_label(&members[0])) {
+        let columns = (cfg.columns.max(1) as usize).min(members.len().max(1));
+        let rows = (members.len() + columns - 1) / columns;
+
+        let sizes: Vec<(i32, i32)> = members.iter().map(|id| live_size(app, id)).collect();
+        let mut col_widths = vec![0i32; columns];
+        let mut row_heights = vec![0i32; rows];
+        for (i, &(w, h)) in sizes.iter().enumerate() {
+            let (row, col) = (i / columns, i % columns);
+            col_widths[col] = col_widths[col].max(w);
+            row_heights[row] = row_heights[row].max(h);
+        }
+        let total_w: i32 = col_widths.iter().sum();
+        let total_h: i32 = row_heights.iter().sum();
+
+        let (clamped_anchor_x, clamped_anchor_y, moved) =
+            crate::windows::clamp_rect_to_screen(&ref_win, cfg.anchor_x, cfg.anchor_y, total_w, total_h);
+
+        if moved {
+            cfg.anchor_x = clamped_anchor_x;
+            cfg.anchor_y = clamped_anchor_y;
+            let mut settings = state.settings.lock().unwrap();
+            settings.dock.anchor_x = clamped_anchor_x;
+            settings.dock.anchor_y = clamped_anchor_y;
+            config::save_dock_anchor(app, clamped_anchor_x, clamped_anchor_y);
+        }
+    }
+
     for (id, x, y) in pack(app, &cfg, &members) {
         if let Some(win) = app.get_webview_window(&widget_label(&id)) {
-            // A docked widget has no titlebar/taskbar entry, so there is no legitimate way for
-            // the user to have minimized it deliberately - if it ends up iconic anyway (seen in
-            // practice after a few rapid dev-mode restarts), `set_position` alone does not
-            // un-minimize a window on Windows, so it would stay invisible forever with no other
-            // recovery path (docked widgets skip `place_widget`'s own minimize/off-screen
-            // recovery). Restore it first so the reposition actually becomes visible.
             if matches!(win.is_minimized(), Ok(true)) {
                 let _ = win.unminimize();
             }
