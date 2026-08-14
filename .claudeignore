@@ -1,0 +1,40 @@
+# Claude Code 컨텍스트 제외 목록 (gitignore 문법, 하위 디렉터리 상속)
+# 목적: 대용량/생성물/의존성만 제외. 소스코드·설정·문서(docs/, README, CHANGELOG 등)는 대상 아님.
+# 주의: .claude/ 와 CLAUDE.md 는 Claude 가 반드시 읽어야 하는 지침이므로 여기 올리지 않는다
+#       (.gitignore 의 해당 라인은 "커밋 금지" 목적이라 여기서는 정반대 목적임).
+
+# 의존성 (JS)
+node_modules/
+
+# 프론트엔드 빌드 산출물 (Vite/Svelte) - 해시된 번들 js/css/폰트, 소스 아님
+/dist/
+/build/
+/.svelte-kit/
+
+# Rust/Tauri 빌드 산출물 - src-tauri/target 단독 수십GB(cargo debug+release+flycheck 캐시)
+/src-tauri/target/
+
+# Tauri 자동 생성 스키마 (capabilities 자동완성용, 소스 아님)
+/src-tauri/gen/schemas/
+
+# 잠금 파일 - 자동 생성, 대용량 저신호 텍스트(필요시 명시적으로 열람)
+package-lock.json
+src-tauri/Cargo.lock
+
+# 바이너리 자산 - 아이콘/폰트, 텍스트 컨텍스트로 무의미
+*.png
+*.ico
+*.icns
+*.woff
+*.woff2
+*.ttf
+
+# 런타임 시크릿/자격증명 - 저장소에 실수로 존재할 경우 대비 (코드상 앱은 app_data_dir 에 씀)
+session.dat
+*.key
+.tauri/
+*.dat
+
+# OS
+Thumbs.db
+.DS_Store

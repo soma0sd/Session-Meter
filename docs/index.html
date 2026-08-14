@@ -6,7 +6,7 @@
     <title>SessionMeter - 사용 설명서</title>
     <meta
       name="description"
-      content="SessionMeter 사용 설명서 - Claude와 Gemini 사용량을 관리하는 데스크톱 앱"
+      content="SessionMeter 사용 설명서 - Claude·Gemini·Antigravity IDE 사용량을 관리하는 데스크톱 앱"
     />
     <link rel="icon" type="image/png" href="favicon.png" />
     <style>
@@ -146,6 +146,40 @@
         margin: 12px 0;
       }
       .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
+      /* Hand-drawn mockups below (settings/stats/tray-menu/docking) illustrate layout and are not
+         literal screenshots or component renders - values shown are placeholders, not real account data. */
+      .mockup-caption {
+        text-align: center; font-size: 0.82rem; color: var(--muted); margin: 8px 0 0;
+      }
+      .app-window {
+        background: #16171d; border: 1px solid #262835; border-radius: 12px; overflow: hidden;
+        font-size: 13px; color: #e8e9ee; max-width: 360px; margin: 0 auto; box-shadow: var(--shadow);
+      }
+      .app-window .titlebar {
+        padding: 9px 14px; font-weight: 600; font-size: 12.5px; color: #cfd1db;
+        border-bottom: 1px solid #232430; background: #1b1c24;
+      }
+      .app-window .awsec { padding: 13px 14px; border-bottom: 1px solid #232430; }
+      .app-window .awsec:last-child { border-bottom: none; }
+      .app-window .awsec h4 {
+        margin: 0 0 10px; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+        color: #767a8a; font-weight: 700;
+      }
+      .aw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; }
+      .aw-row + .aw-row { border-top: 1px solid #1f2029; }
+      .aw-name { font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+      .aw-sub { color: #767a8a; font-size: 11px; margin-top: 1px; }
+      .aw-chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+      .aw-chip-plan { background: rgba(96,132,246,.18); color: #93b4fb; }
+      .aw-chip-running { background: rgba(52,211,153,.16); color: #6ee7b0; }
+      .aw-btn { border: 1px solid #383a48; background: #22232c; color: #c8cad4; font-size: 11px; padding: 4px 10px; border-radius: 7px; white-space: nowrap; }
+      .aw-toggle { display: inline-flex; width: 30px; height: 17px; border-radius: 999px; background: #2c2e3a; padding: 2px; }
+      .aw-toggle.on { background: #3b6fe0; justify-content: flex-end; }
+      .aw-toggle i { width: 13px; height: 13px; border-radius: 999px; background: #e8e9ee; display: block; }
+      .aw-menu-item { padding: 8px 12px; font-size: 12.5px; border-radius: 7px; }
+      .aw-menu-item:hover { background: #22232c; }
+      .aw-menu-sep { height: 1px; background: #232430; margin: 5px 8px; }
+      .aw-value { color: #c8cad4; font-size: 12px; }
       footer { text-align: center; padding: 26px 20px; color: var(--muted); border-top: 1px solid var(--border); font-size: 0.86rem; }
       a { color: var(--accent); }
       @media (max-width: 760px) { nav { display: none; } .layout { padding-top: 22px; } }
@@ -154,7 +188,7 @@
   <body>
     <header>
       <h1>SessionMeter</h1>
-      <p>Claude · Gemini 사용량 관리 데스크톱 앱 · 사용 설명서</p>
+      <p>Claude · Gemini · Antigravity IDE 사용량 관리 데스크톱 앱 · 사용 설명서</p>
     </header>
 
     <div class="layout">
@@ -179,20 +213,23 @@
         <section id="intro">
           <h2>소개</h2>
           <p>
-            SessionMeter는 <b>Claude</b>와 <b>Gemini</b>의 사용량을 시스템 트레이
-            아이콘, 데스크톱 위젯, 통계 창으로 보여 주는 데스크톱 애플리케이션입니다. 로그인한
-            서비스마다 5시간·주간 등의 남은 사용량과 초기화까지 남은 시간을 한눈에 확인할 수 있습니다.
-            Tauri v2로 제작된 오픈소스(MIT) 프로그램입니다.
+            SessionMeter는 <b>Claude</b>, <b>Gemini</b>, <b>Antigravity IDE</b>의 사용량을 시스템
+            트레이 아이콘, 데스크톱 위젯, 통계 창으로 보여 주는 데스크톱 애플리케이션입니다. 로그인한
+            (또는 연동된) 서비스마다 5시간·주간 등의 남은 사용량과 초기화까지 남은 시간을 한눈에 확인할
+            수 있습니다. Tauri v2로 제작된 오픈소스(MIT) 프로그램입니다.
           </p>
           <div class="warn">
-            <b>비공식 도구이며 이용약관에 유의해야 합니다.</b> SessionMeter는 로그인된 본인 세션을
-            이용해 각 서비스의 사용량 페이지와 동일한 데이터를 가져옵니다. 공식/공개 API가 아니며
-            해당 서비스의 API 키를 사용하지 않습니다. 각 서비스의 약관은 봇·스크립트 등 자동 수단의
-            접근을 제한하므로 이 방식은 약관에 어긋날 수 있고 계정 제재 위험이 있습니다. 반드시
+            <b>비공식 도구이며 이용약관에 유의해야 합니다.</b> Claude·Gemini는 로그인된 본인 세션을
+            이용해 각 서비스의 사용량 페이지와 동일한 데이터를 가져오는 방식입니다. 공식/공개 API가
+            아니며 해당 서비스의 API 키를 사용하지 않습니다. 각 서비스의 약관은 봇·스크립트 등 자동
+            수단의 접근을 제한하므로 이 방식은 약관에 어긋날 수 있고 계정 제재 위험이 있습니다. 반드시
             <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic 약관</a>과
             <a href="https://policies.google.com/terms">Google 약관</a>을 확인하고 본인 책임으로
-            사용하십시오. 본 프로그램은 Anthropic·Google과 무관하며, "Claude"는 Anthropic, PBC의,
-            "Gemini"는 Google LLC의 상표입니다.
+            사용하십시오. Antigravity IDE는 원격 웹 페이지가 아니라 <b>본인 PC에서 실행 중인 IDE가
+            제공하는 로컬(loopback) API</b>를 사용하므로 위 두 서비스와 위험 성격이 다르지만, 문서화되지
+            않은 인터페이스이므로 IDE 업데이트에 따라 동작이 바뀌거나 중단될 수 있습니다. 본 프로그램은
+            Anthropic·Google·Antigravity IDE 개발사와 무관하며, "Claude"는 Anthropic, PBC의, "Gemini"는
+            Google LLC의, "Antigravity"는 해당 개발사의 상표입니다.
           </div>
         </section>
 
@@ -230,6 +267,39 @@
             기능입니다. Google이 임베드 브라우저 로그인을 정책적으로 제한하므로, 로그인이 실패하거나
             페이지 구조 변경으로 수치가 달라질 수 있습니다.
           </div>
+          <h3>Antigravity IDE</h3>
+          <p>
+            Antigravity IDE는 로그인이 <b>따로 필요 없습니다</b>. 로컬에 설치된 Antigravity IDE가
+            실행 중이면 SessionMeter가 자동으로 감지해 연동하고, 설정 창 계정 목록에 <b>실행 중</b>
+            상태로 표시됩니다. IDE를 종료하면 연동도 함께 해제됩니다.
+          </p>
+          <div class="render-inline">
+            <div class="app-window">
+              <div class="titlebar">설정 - 계정</div>
+              <div class="awsec">
+                <div class="aw-row">
+                  <div>
+                    <div class="aw-name">Claude</div>
+                    <div class="aw-sub">you@example.com</div>
+                    <span class="aw-chip aw-chip-plan" style="margin-top:4px;display:inline-block;">Claude Pro</span>
+                  </div>
+                  <button class="aw-btn" type="button">로그아웃</button>
+                </div>
+                <div class="aw-row">
+                  <div class="aw-name">Gemini</div>
+                  <button class="aw-btn" type="button">로그아웃</button>
+                </div>
+                <div class="aw-row">
+                  <div>
+                    <div class="aw-name">Antigravity</div>
+                    <div class="aw-sub">you@example.com</div>
+                  </div>
+                  <span class="aw-chip aw-chip-running">실행 중</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="mockup-caption">설정 창의 계정 패널(예시 값 - 실제 화면과 배치를 간략히 재현한 그림)</p>
         </section>
 
         <section id="tray-icon">
@@ -241,9 +311,9 @@
           <table>
             <thead><tr><th>상태</th><th>의미(남은 사용량 기준)</th></tr></thead>
             <tbody>
-              <tr><td>여유(녹색)</td><td>50% 이상 남음</td></tr>
-              <tr><td>주의(노랑)</td><td>20% ~ 50% 남음</td></tr>
-              <tr><td>경고(빨강)</td><td>20% 미만 남음</td></tr>
+              <tr><td><span class="swatch" style="background:rgb(34,197,94)"></span>여유(녹색)</td><td>50% 이상 남음</td></tr>
+              <tr><td><span class="swatch" style="background:rgb(234,179,8)"></span>주의(노랑)</td><td>20% ~ 50% 남음</td></tr>
+              <tr><td><span class="swatch" style="background:rgb(239,68,68)"></span>경고(빨강)</td><td>20% 미만 남음</td></tr>
             </tbody>
           </table>
           <p>
@@ -267,6 +337,18 @@
             위젯 표시/숨김은 위젯 스타일 창에서 서비스별로 켜고 끕니다. 메뉴는 앱 테마에 맞춰
             다크/라이트로 표시됩니다.
           </p>
+          <div class="render-inline">
+            <div class="app-window" style="max-width:180px;">
+              <div style="padding:6px;">
+                <div class="aw-menu-item">위젯 스타일</div>
+                <div class="aw-menu-item">통계</div>
+                <div class="aw-menu-item">설정</div>
+                <div class="aw-menu-sep"></div>
+                <div class="aw-menu-item">종료</div>
+              </div>
+            </div>
+          </div>
+          <p class="mockup-caption">트레이 우클릭 메뉴(예시 그림)</p>
         </section>
 
         <section id="widget">
@@ -313,6 +395,38 @@
             <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:301.938px;height:126.734px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:12px;width:273.938px;height:102.734px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:84px;height:84px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 100" style="display:inline;flex-direction:row;width:84px;height:84px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" stroke-dasharray="240" stroke-dashoffset="91.19999999999999" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:6px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" stroke-dasharray="180" stroke-dashoffset="109.8" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></path></svg> <div style="display:grid;flex-direction:row;align-items:center;grid-template-columns:84px;position:absolute;width:84px;height:84px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:38.7969px;height:26.3906px;color:rgb(24, 24, 27);font-size:17.6px;font-weight:800;font-variant-numeric:tabular-nums;line-height:26.4px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">62%</span></div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div><figcaption><b>Hexagonal Rings</b> · 상세</figcaption></figure>
             <figure class="style-card"><div class="style-stage"><div style="display:inline-flex;flex-direction:row;width:133.562px;height:80px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:row;align-items:center;gap:9px;width:105.562px;height:56px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;position:relative;width:56px;height:56px;flex:0 0 auto;flex-shrink:0;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><svg viewBox="0 0 100 100" style="display:inline;flex-direction:row;width:56px;height:56px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;fill:rgb(0, 0, 0);stroke:none;stroke-width:1px;stroke-linecap:butt;"><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 10 L84.64 30 L84.64 70 L50 90 L15.36 70 L15.36 30 Z" stroke-dasharray="240" stroke-dashoffset="91.19999999999999" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(217, 119, 87);stroke-width:6px;stroke-linecap:round;filter:drop-shadow(rgba(217, 119, 87, 0.5) 0px 0px 2px);"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(226, 228, 234);stroke-width:6px;stroke-linecap:round;"></path><path stroke-width="6" d="M50 20 L75.98 35 L75.98 65 L50 80 L24.02 65 L24.02 35 Z" stroke-dasharray="180" stroke-dashoffset="109.8" style="display:inline;flex-direction:row;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;fill:none;stroke:rgb(224, 164, 88);stroke-width:6px;stroke-linecap:round;"></path></svg> <div style="display:grid;flex-direction:row;align-items:center;grid-template-columns:56px;position:absolute;width:56px;height:56px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:46.6875px;height:14.875px;color:rgb(24, 24, 27);font-size:9.92px;font-weight:400;font-variant-numeric:tabular-nums;line-height:14.88px;text-align:start;text-shadow:rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px, rgb(255, 255, 255) 0px 0px 3px;">2:14</span></div></div> <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;width:40.5625px;height:33.5312px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:40.5625px;height:18.4062px;color:rgb(217, 119, 87);font-size:18.4px;font-weight:800;font-variant-numeric:tabular-nums;line-height:18.4px;text-align:start;">62%</span> <span style="display:block;flex-direction:row;width:28.125px;height:13.125px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:13.12px;text-align:start;">39%</span></div></div></div></div><figcaption><b>Hexagonal Rings</b> · 컴팩트</figcaption></figure>
           </div>
+          <h3>위젯 그리드 도킹</h3>
+          <p>
+            설정 창의 <b>위젯 스타일 → 배치</b> 탭에서 <b>위젯 그리드 도킹</b>을 켜면 로그인한 서비스의
+            위젯들이 격자로 맞붙어 하나처럼 움직입니다. 열 개수와 서비스 순서를 지정할 수 있고, 도킹된
+            위젯 중 하나를 드래그하면 그룹 전체가 함께 이동합니다.
+          </p>
+          <div class="render-inline">
+            <div style="display:flex; gap:2px;">
+              <div class="app-window" style="max-width:126px;">
+                <div class="titlebar" style="font-size:11px;padding:7px 10px;">Claude</div>
+                <div class="awsec" style="padding:10px;">
+                  <div class="aw-value" style="font-size:16px;font-weight:700;color:rgb(217,119,87);">62%</div>
+                  <div class="aw-sub">이번 세션</div>
+                </div>
+              </div>
+              <div class="app-window" style="max-width:126px;">
+                <div class="titlebar" style="font-size:11px;padding:7px 10px;">Gemini</div>
+                <div class="awsec" style="padding:10px;">
+                  <div class="aw-value" style="font-size:16px;font-weight:700;color:rgb(66,133,244);">41%</div>
+                  <div class="aw-sub">이번 세션</div>
+                </div>
+              </div>
+              <div class="app-window" style="max-width:126px;">
+                <div class="titlebar" style="font-size:11px;padding:7px 10px;">Antigravity</div>
+                <div class="awsec" style="padding:10px;">
+                  <div class="aw-value" style="font-size:16px;font-weight:700;color:rgb(45,212,167);">88%</div>
+                  <div class="aw-sub">이번 세션</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="mockup-caption">그리드 도킹으로 맞붙은 3개 서비스 위젯(예시 그림, 열 개수 3)</p>
         </section>
 
         <section id="stats">
@@ -327,6 +441,41 @@
             <li>현재 속도 기준 소진 예측</li>
             <li>항목별 초기화 시각 일정</li>
           </ul>
+          <div class="render-inline">
+            <div class="app-window">
+              <div class="titlebar" style="display:flex;gap:14px;">
+                <span style="color:#e8e9ee;border-bottom:2px solid rgb(217,119,87);padding-bottom:8px;">Claude</span>
+                <span style="color:#767a8a;">Gemini</span>
+                <span style="color:#767a8a;">Antigravity</span>
+              </div>
+              <div class="awsec">
+                <div class="aw-row">
+                  <div class="aw-name">이번 세션</div>
+                  <div class="aw-value" style="color:rgb(217,119,87);font-weight:700;">62% 남음 · 2시간 18분 후 초기화</div>
+                </div>
+                <div class="aw-row">
+                  <div class="aw-name">주간 세션</div>
+                  <div class="aw-value" style="color:#f5c542;font-weight:700;">34% 남음 · 3일 6시간 후 초기화</div>
+                </div>
+              </div>
+              <div class="awsec">
+                <h4>최근 사용 추세</h4>
+                <div style="display:flex;gap:10px;font-size:10.5px;color:#767a8a;margin-bottom:8px;">
+                  <span style="color:#93b4fb;font-weight:700;">24시간</span><span>7일</span><span>1개월</span>
+                </div>
+                <svg viewBox="0 0 300 70" style="width:100%;height:70px;display:block;">
+                  <polyline points="0,55 30,50 60,52 90,38 120,42 150,25 180,30 210,18 240,22 270,10 300,14"
+                    fill="none" stroke="rgb(217,119,87)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <div class="awsec">
+                <h4>소진 예측 · 초기화 일정</h4>
+                <div class="aw-sub">현재 속도라면 약 <b style="color:#c8cad4;">1시간 40분</b> 후 이번 세션 소진 예상</div>
+                <div class="aw-sub" style="margin-top:4px;">주간 세션 초기화: <b style="color:#c8cad4;">8월 17일 09:00</b></div>
+              </div>
+            </div>
+          </div>
+          <p class="mockup-caption">통계 창(예시 값 - 실제 화면과 배치를 간략히 재현한 그림)</p>
         </section>
 
         <section id="notifications">
@@ -350,12 +499,37 @@
             <li><b>갱신 주기</b>: 1 / 5 / 10 / 15 / 30분.</li>
             <li><b>시작 시 실행</b>: 로그인 시 자동 실행 등록.</li>
             <li><b>알림</b>: 사용량 기준·초기화 알림.</li>
-            <li><b>계정</b>: 서비스별 로그인 상태(이름·이메일)와 로그인/로그아웃 버튼.</li>
+            <li><b>계정</b>: Claude·Gemini는 로그인 상태(이름·이메일)와 로그인/로그아웃 버튼, Antigravity는
+              로그인 개념이 없어 IDE 실행 여부에 따라 <b>실행 중</b> 상태만 표시됩니다.</li>
           </ul>
           <p>
-            위젯 관련 설정(스타일, 표시 기준, 투명도, 항상 위, 이동 잠금)은 <b>위젯 스타일</b> 창에서
-            서비스별로 관리합니다.
+            위젯 관련 설정(스타일, 표시 기준, 투명도, 항상 위, 이동 잠금, 그리드 도킹)은 <b>위젯 스타일</b>
+            창에서 서비스별로 관리합니다.
           </p>
+          <div class="render-inline">
+            <div class="app-window">
+              <div class="titlebar">설정 - 일반</div>
+              <div class="awsec">
+                <div class="aw-row"><div class="aw-name">테마</div><div class="aw-value">시스템</div></div>
+                <div class="aw-row"><div class="aw-name">언어</div><div class="aw-value">자동 (OS)</div></div>
+                <div class="aw-row"><div class="aw-name">갱신 주기</div><div class="aw-value">5분</div></div>
+                <div class="aw-row">
+                  <div class="aw-name">시작 시 실행</div>
+                  <span class="aw-toggle on"><i></i></span>
+                </div>
+              </div>
+              <div class="awsec">
+                <div class="aw-row">
+                  <div>
+                    <div class="aw-name">업데이트</div>
+                    <div class="aw-sub">현재 v0.5.1</div>
+                  </div>
+                  <button class="aw-btn" type="button">업데이트 확인</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="mockup-caption">설정 창의 일반·업데이트 패널(예시 값 - 실제 화면과 배치를 간략히 재현한 그림)</p>
         </section>
 
         <section id="troubleshooting">
@@ -367,6 +541,10 @@
             <li><b>Gemini 로그인 화면이 뜨지 않거나 "안전하지 않은 브라우저" 안내가 나옴</b>:
               Google이 임베드 로그인을 제한하는 경우입니다. 창을 닫고 잠시 후 다시 시도합니다. 로그인
               창은 별도 프로세스라 실패해도 앱 본체는 계속 동작합니다.</li>
+            <li><b>Antigravity가 "실행 중"으로 표시되지 않음</b>: Antigravity IDE가 실제로 실행
+              중인지 확인합니다. IDE의 로그인 포트·인증 토큰은 재시작마다 바뀌므로 SessionMeter가
+              매번 다시 탐색하며, IDE를 새로 켰다면 다음 갱신 주기까지 잠시 기다립니다. 현재 Windows
+              에서만 지원됩니다.</li>
             <li><b>트레이 아이콘이 보이지 않음</b>: Windows 작업 표시줄의 숨겨진 아이콘 영역(^)을
               확인합니다.</li>
             <li><b>수치가 갱신되지 않음</b>: 설정의 갱신 주기를 확인합니다. 갱신은 주기마다 자동으로
@@ -381,13 +559,14 @@
             Font License 1.1을 따릅니다.
           </p>
           <p>
-            SessionMeter는 claude.ai·gemini.google.com의 비공식 엔드포인트를 사용하므로 언제든 동작이
-            바뀔 수 있습니다. 본인 계정의 세션으로만 동작하며,
+            SessionMeter는 claude.ai·gemini.google.com의 비공식 엔드포인트와, 로컬에서 실행 중인
+            Antigravity IDE의 비공개 로컬 API를 사용하므로 언제든 동작이 바뀔 수 있습니다. 본인 계정의
+            세션(또는 본인 PC의 IDE)으로만 동작하며,
             <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic 약관</a>과
             <a href="https://policies.google.com/terms">Google 약관</a>을 확인한 뒤 본인 책임으로
-            사용하십시오. 본 프로그램은 Anthropic·Google과 제휴·후원·보증 관계가 없으며, "Claude"·
-            "Anthropic"은 Anthropic, PBC의, "Gemini"는 Google LLC의 상표로 호환 대상을
-            설명하기 위해서만 사용되었습니다.
+            사용하십시오. 본 프로그램은 Anthropic·Google·Antigravity IDE 개발사와 제휴·후원·보증
+            관계가 없으며, "Claude"·"Anthropic"은 Anthropic, PBC의, "Gemini"는 Google LLC의,
+            "Antigravity"는 해당 개발사의 상표로 호환 대상을 설명하기 위해서만 사용되었습니다.
           </p>
         </section>
       </main>

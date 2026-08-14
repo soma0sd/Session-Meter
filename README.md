@@ -94,9 +94,9 @@ npm run tauri build    # 릴리스 빌드 + 설치 프로그램(NSIS) 생성
 
 ## 문서
 
-사용 설명서는 [`docs/`](docs/)에 있으며 GitHub Pages로 배포됩니다(한국어).
-가져올 수 있는 데이터의 범위와 한계는 [`docs/DATA_CAPABILITIES.md`](docs/DATA_CAPABILITIES.md)를
-참고하십시오.
+**[온라인 사용 설명서](https://soma0sd.github.io/Session-Meter/)**(한국어, GitHub Pages)를 참고하십시오.
+소스는 [`docs/`](docs/)에 있습니다. 가져올 수 있는 데이터의 범위와 한계는
+[`docs/DATA_CAPABILITIES.md`](docs/DATA_CAPABILITIES.md)를 참고하십시오.
 
 ## 보안·프라이버시
 
