@@ -15,6 +15,11 @@ use std::sync::mpsc;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use base64::{
+    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+    Engine as _,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -25,6 +30,9 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+const SESSION_URL: &str = "https://chatgpt.com/api/auth/session";
+const CHATGPT_ORIGIN: &str = "https://chatgpt.com";
+const CHATGPT_REFERER: &str = "https://chatgpt.com/";
 const WEEKLY_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(295);
 const LOGIN_RESULT_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -34,6 +42,45 @@ const LOGIN_RESULT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 static CODEX_LOGIN_BUSY: AtomicBool = AtomicBool::new(false);
 static CODEX_LOGIN_EPOCH: AtomicU64 = AtomicU64::new(0);
 static CODEX_SESSION_LOCK: Mutex<()> = Mutex::new(());
+
+/// The encrypted Codex credential deliberately persists only the browser session and the user
+/// agent that established its Cloudflare challenge. OAuth bearer tokens are reacquired from the
+/// session endpoint for every request and are never written to disk.
+#[derive(Clone, Deserialize, Serialize)]
+struct CodexSession {
+    cookie: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user_agent: Option<String>,
+}
+
+struct SessionCredentials {
+    access_token: String,
+    account_id: Option<String>,
+}
+
+impl CodexSession {
+    fn decode(value: &str) -> Result<Self, AppError> {
+        // v1.0.1 stored a raw cookie header. Keep it readable so an existing installation can
+        // refresh successfully without forcing a new login solely for this format change.
+        let session = serde_json::from_str::<Self>(value).unwrap_or_else(|_| Self {
+            cookie: value.to_string(),
+            user_agent: None,
+        });
+        if !is_safe_header_value(&session.cookie) {
+            return Err(AppError::Parse(
+                "Codex browser cookie is invalid".to_string(),
+            ));
+        }
+        Ok(Self {
+            cookie: session.cookie,
+            user_agent: session.user_agent.filter(|agent| is_safe_user_agent(agent)),
+        })
+    }
+
+    fn encode(&self) -> Result<String, AppError> {
+        serde_json::to_string(self).map_err(|error| AppError::Parse(error.to_string()))
+    }
+}
 
 struct LoginGuard;
 
@@ -153,17 +200,37 @@ pub fn parse_usage(raw: &Value) -> Result<UsageSnapshot, AppError> {
     })
 }
 
+/// Fetch Codex quota from a persisted browser session. ChatGPT's session endpoint returns a
+/// short-lived bearer token; the token stays in memory and is exchanged for every poll instead
+/// of being persisted beside the DPAPI-encrypted cookie.
 pub async fn fetch_usage(
     client: &reqwest::Client,
-    cookie: &str,
+    cookie_or_session: &str,
 ) -> Result<UsageSnapshot, AppError> {
-    let resp = client
+    let session = CodexSession::decode(cookie_or_session)?;
+    let credentials = fetch_session_credentials(client, &session).await?;
+
+    let mut request = client
         .get(USAGE_URL)
-        .header(reqwest::header::COOKIE, cookie)
+        .header(reqwest::header::COOKIE, &session.cookie)
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", credentials.access_token),
+        )
         .header(reqwest::header::ACCEPT, "application/json")
-        .header("OAI-App-Brand", "codex")
-        .send()
-        .await?;
+        .header(reqwest::header::ORIGIN, CHATGPT_ORIGIN)
+        .header(reqwest::header::REFERER, CHATGPT_REFERER)
+        .header("OAI-Product-Sku", "codex")
+        // Keep the older marker as a compatibility hint while the official Codex product SKU is
+        // the authentication-relevant identifier.
+        .header("OAI-App-Brand", "codex");
+    if let Some(account_id) = credentials.account_id.as_deref() {
+        request = request.header("ChatGPT-Account-ID", account_id);
+    }
+    if let Some(user_agent) = session.user_agent.as_deref() {
+        request = request.header(reqwest::header::USER_AGENT, user_agent);
+    }
+    let resp = request.send().await?;
     ensure_success(resp.status().as_u16())?;
     let raw = resp
         .json::<Value>()
@@ -172,10 +239,199 @@ pub async fn fetch_usage(
     parse_usage(&raw)
 }
 
-/// Start a disposable, isolated Codex login webview. The helper must first prove that its browser
-/// session can fetch the usage endpoint. This parent process then validates the returned cookie a
-/// second time before DPAPI-backed persistence, so no helper output can create a signed-in state
-/// on its own.
+async fn fetch_session_credentials(
+    client: &reqwest::Client,
+    session: &CodexSession,
+) -> Result<SessionCredentials, AppError> {
+    let mut request = client
+        .get(SESSION_URL)
+        .header(reqwest::header::COOKIE, &session.cookie)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::ORIGIN, CHATGPT_ORIGIN)
+        .header(reqwest::header::REFERER, CHATGPT_REFERER);
+    if let Some(user_agent) = session.user_agent.as_deref() {
+        request = request.header(reqwest::header::USER_AGENT, user_agent);
+    }
+    let resp = request.send().await?;
+    ensure_success(resp.status().as_u16())?;
+    let raw = resp
+        .json::<Value>()
+        .await
+        .map_err(|error| AppError::Parse(error.to_string()))?;
+    parse_session_credentials(&raw)
+}
+
+fn parse_session_credentials(raw: &Value) -> Result<SessionCredentials, AppError> {
+    let Some(access_token) = raw
+        .get("accessToken")
+        .or_else(|| raw.get("access_token"))
+        .and_then(Value::as_str)
+    else {
+        return Err(missing_access_token_error(raw));
+    };
+    if !is_safe_header_value(access_token) {
+        return Err(AppError::Parse("Codex access token is invalid".to_string()));
+    }
+    let account_id = raw
+        .get("accountId")
+        .or_else(|| raw.get("account_id"))
+        .and_then(Value::as_str)
+        .filter(|id| is_safe_header_value(id))
+        .map(ToString::to_string)
+        .or_else(|| account_id_from_jwt(&access_token))
+        .or_else(|| {
+            raw.get("idToken")
+                .or_else(|| raw.get("id_token"))
+                .and_then(Value::as_str)
+                .and_then(account_id_from_jwt)
+        });
+    Ok(SessionCredentials {
+        access_token: access_token.to_string(),
+        account_id,
+    })
+}
+
+/// A signed-out ChatGPT visit can return HTTP 200 with a warning banner or an empty NextAuth
+/// session. Those shapes are a rejected browser credential, not an endpoint schema change. Keep
+/// every other token-less shape as `Parse` so an authenticated response change stays visible.
+fn missing_access_token_error(raw: &Value) -> AppError {
+    if session_explicitly_unauthenticated(raw) {
+        AppError::Unauthorized
+    } else {
+        AppError::Parse("Codex access token is missing".to_string())
+    }
+}
+
+fn session_explicitly_unauthenticated(raw: &Value) -> bool {
+    let Some(session) = raw.as_object() else {
+        return false;
+    };
+    if session.is_empty() || session.get("user").is_some_and(Value::is_null) {
+        return true;
+    }
+    if session.contains_key("WARNING_BANNER") {
+        return true;
+    }
+    ["warning", "error", "code"]
+        .iter()
+        .filter_map(|key| session.get(*key).and_then(Value::as_str))
+        .any(|code| code == "WARNING_BANNER")
+        || session
+            .get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(Value::as_str)
+            .is_some_and(|code| code == "WARNING_BANNER")
+}
+
+fn account_id_from_jwt(access_token: &str) -> Option<String> {
+    let payload = access_token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| URL_SAFE.decode(payload))
+        .ok()?;
+    let claims = serde_json::from_slice::<Value>(&decoded).ok()?;
+    claims
+        .get("https://api.openai.com/auth")
+        .and_then(|auth| auth.get("chatgpt_account_id"))
+        .or_else(|| claims.get("chatgpt_account_id"))
+        .and_then(Value::as_str)
+        .filter(|id| is_safe_header_value(id))
+        .map(ToString::to_string)
+}
+
+fn is_safe_header_value(value: &str) -> bool {
+    !value.is_empty() && !value.contains(['\r', '\n'])
+}
+
+fn is_safe_user_agent(value: &str) -> bool {
+    is_safe_header_value(value) && value.len() <= 512
+}
+
+/// Invalidate only the exact browser session that produced an unauthorised poll result. A
+/// background poll can finish while a new login persists another session; the shared lock keeps
+/// this comparison, invalidation, and UI transition ordered with login and logout.
+///
+/// `true` means this poll owned the current session and transitioned it to signed out. `false`
+/// means a newer login or logout won the race, so its newer UI state is left untouched.
+pub fn invalidate_session_if_current(
+    app: &AppHandle,
+    expected_session: &str,
+) -> Result<bool, AppError> {
+    let _session_guard = session_lock();
+    let current_session = config::load_cookie(app, crate::service::CODEX);
+    if !session_matches_expected(current_session.as_deref(), expected_session) {
+        return Ok(false);
+    }
+
+    let invalidation_result = config::invalidate_cookie(app, crate::service::CODEX);
+    // Keep the state/event update inside the same lock. If a login starts immediately after the
+    // invalidation, it will persist its verified snapshot only after this old poll has finished.
+    crate::usage::mark_status(app, crate::service::CODEX, "unauthorized");
+    let _ = app.emit(
+        "session://changed",
+        serde_json::json!({
+            "service": crate::service::CODEX,
+            "logged_in": false,
+            "org_name": "",
+        }),
+    );
+    invalidation_result.map(|()| true)
+}
+
+/// Apply a successful Codex poll only while the browser session that initiated it is still the
+/// persisted session. The lock keeps this comparison and every `apply_snapshot` side effect
+/// ordered with logout and completed login persistence.
+///
+/// `true` means the snapshot was applied. `false` means logout or a newer login won the race,
+/// so history, notifications, tray, and frontend state remain untouched by the stale result.
+pub fn apply_snapshot_if_session_current(
+    app: &AppHandle,
+    expected_session: &str,
+    snapshot: UsageSnapshot,
+) -> bool {
+    let _session_guard = session_lock();
+    let current_session = config::load_cookie(app, crate::service::CODEX);
+    transition_if_session_matches(current_session.as_deref(), expected_session, || {
+        crate::usage::apply_snapshot(app, snapshot);
+    })
+}
+
+/// Mark a Codex poll failure only while the session that initiated the request remains current.
+/// This uses the same critical section as successful snapshots so an old transport or parse
+/// failure cannot replace a completed login or logout status with `error`.
+pub fn mark_status_if_session_current(
+    app: &AppHandle,
+    expected_session: &str,
+    status: &str,
+) -> bool {
+    let _session_guard = session_lock();
+    let current_session = config::load_cookie(app, crate::service::CODEX);
+    transition_if_session_matches(current_session.as_deref(), expected_session, || {
+        crate::usage::mark_status(app, crate::service::CODEX, status);
+    })
+}
+
+fn session_matches_expected(current_session: Option<&str>, expected_session: &str) -> bool {
+    current_session == Some(expected_session)
+}
+
+/// Keep tests focused on the side-effect boundary while the public wrappers above own the
+/// session lock and persistence read.
+fn transition_if_session_matches(
+    current_session: Option<&str>,
+    expected_session: &str,
+    transition: impl FnOnce(),
+) -> bool {
+    if !session_matches_expected(current_session, expected_session) {
+        return false;
+    }
+    transition();
+    true
+}
+
+/// Start a disposable, isolated Codex login webview. The helper detects an authenticated browser
+/// session, then this parent process validates its returned cookie with a fresh OAuth bearer
+/// request before DPAPI-backed persistence. No helper output alone can create a signed-in state.
 pub fn start_login(app: &AppHandle) {
     // Take this synchronously so a second Settings click cannot enqueue an otherwise harmless
     // helper that would invalidate the first attempt's completion epoch.
@@ -217,11 +473,20 @@ pub fn start_login(app: &AppHandle) {
         // intentionally temporary because the encrypted session file is the sole persisted copy.
         let _ = std::fs::remove_dir_all(&profile);
 
-        let Some(cookie) = result.as_deref().and_then(helper_cookie) else {
+        let Some(session) = result.as_deref().and_then(helper_session) else {
             if login_is_current(epoch) && !matches!(result.as_deref(), Some("CANCELLED")) {
                 crate::usage::mark_status(&app, crate::service::CODEX, "error");
             }
             return;
+        };
+        let serialized_session = match session.encode() {
+            Ok(value) => value,
+            Err(_) => {
+                if login_is_current(epoch) {
+                    crate::usage::mark_status(&app, crate::service::CODEX, "error");
+                }
+                return;
+            }
         };
 
         if !login_is_current(epoch) {
@@ -237,20 +502,21 @@ pub fn start_login(app: &AppHandle) {
             }
             return;
         };
-        let snapshot = match tauri::async_runtime::block_on(fetch_usage(&client, cookie)) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                let status = if matches!(error, AppError::Unauthorized) {
-                    "unauthorized"
-                } else {
-                    "error"
-                };
-                if login_is_current(epoch) {
-                    crate::usage::mark_status(&app, crate::service::CODEX, status);
+        let snapshot =
+            match tauri::async_runtime::block_on(fetch_usage(&client, &serialized_session)) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    let status = if matches!(error, AppError::Unauthorized) {
+                        "unauthorized"
+                    } else {
+                        "error"
+                    };
+                    if login_is_current(epoch) {
+                        crate::usage::mark_status(&app, crate::service::CODEX, status);
+                    }
+                    return;
                 }
-                return;
-            }
-        };
+            };
 
         // Serialize persistence and UI transition with logout. A late helper result must never
         // restore a session that the user explicitly removed while the login was open.
@@ -258,7 +524,7 @@ pub fn start_login(app: &AppHandle) {
         if !login_is_current(epoch) {
             return;
         }
-        if config::save_cookie(&app, crate::service::CODEX, cookie).is_err() {
+        if config::save_cookie(&app, crate::service::CODEX, &serialized_session).is_err() {
             crate::usage::mark_status(&app, crate::service::CODEX, "error");
             return;
         }
@@ -333,7 +599,11 @@ fn spawn_login_helper(profile: &Path) -> std::io::Result<Child> {
 /// short polling interval also observes logout promptly, so its stale helper process does not
 /// keep the single-login guard occupied until the full interactive timeout elapses.
 fn read_result(child: &mut Child, timeout: Duration, epoch: u64) -> Option<String> {
-    let stdout = child.stdout.take()?;
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    };
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -375,11 +645,15 @@ fn result_poll_delay(remaining: Duration) -> Duration {
     remaining.min(LOGIN_RESULT_POLL_INTERVAL)
 }
 
-/// Accept only the helper's single-line cookie transport. Never log this payload.
-fn helper_cookie(payload: &str) -> Option<&str> {
-    payload
-        .strip_prefix("COOKIE ")
-        .filter(|cookie| !cookie.is_empty() && !cookie.contains(['\r', '\n']))
+/// Accept only the helper's structured single-line transport. The cookie and browser user agent
+/// are stored together so a Cloudflare-cleared browser session is replayed with its original UA.
+/// Never log this payload.
+fn helper_session(payload: &str) -> Option<CodexSession> {
+    let serialized = payload.strip_prefix("COOKIE ")?;
+    if serialized.contains(['\r', '\n']) {
+        return None;
+    }
+    CodexSession::decode(serialized).ok()
 }
 
 fn ensure_success(code: u16) -> Result<(), AppError> {
@@ -462,11 +736,187 @@ mod tests {
     }
 
     #[test]
-    fn accepts_only_single_line_helper_cookie_transport() {
-        assert_eq!(helper_cookie("COOKIE session=value"), Some("session=value"));
-        assert!(helper_cookie("COOKIE ").is_none());
-        assert!(helper_cookie("COOKIE session=value\nnext").is_none());
-        assert!(helper_cookie("CANCELLED").is_none());
+    fn session_credentials_read_bearer_and_account_id_from_jwt() {
+        let payload = URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&json!({
+                "https://api.openai.com/auth": { "chatgpt_account_id": "workspace-123" }
+            }))
+            .expect("JWT claims serialize"),
+        );
+        let token = format!("header.{payload}.signature");
+        let credentials = parse_session_credentials(&json!({ "accessToken": token }))
+            .expect("session credentials");
+
+        assert_eq!(credentials.account_id.as_deref(), Some("workspace-123"));
+        assert!(credentials.access_token.starts_with("header."));
+    }
+
+    #[test]
+    fn session_credentials_accept_snake_case_and_bearer_only_fallback() {
+        let credentials = parse_session_credentials(&json!({
+            "access_token": "not-a-jwt-but-valid-for-bearer"
+        }))
+        .expect("bearer-only session is allowed");
+
+        assert_eq!(credentials.access_token, "not-a-jwt-but-valid-for-bearer");
+        assert!(credentials.account_id.is_none());
+    }
+
+    #[test]
+    fn session_credentials_fall_back_to_id_token_account_claim() {
+        let payload = URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&json!({
+                "https://api.openai.com/auth": { "chatgpt_account_id": "workspace-from-id-token" }
+            }))
+            .expect("JWT claims serialize"),
+        );
+        let credentials = parse_session_credentials(&json!({
+            "accessToken": "opaque-access-token",
+            "idToken": format!("header.{payload}.signature")
+        }))
+        .expect("session credentials");
+
+        assert_eq!(
+            credentials.account_id.as_deref(),
+            Some("workspace-from-id-token")
+        );
+    }
+
+    #[test]
+    fn explicitly_signed_out_session_shapes_are_unauthorized() {
+        for session in [
+            json!({}),
+            json!({ "user": null, "expires": "2026-08-20T00:00:00.000Z" }),
+            json!({ "WARNING_BANNER": "Sign in required" }),
+            json!({ "error": { "code": "WARNING_BANNER" } }),
+        ] {
+            assert!(matches!(
+                parse_session_credentials(&session),
+                Err(AppError::Unauthorized)
+            ));
+        }
+    }
+
+    #[test]
+    fn malformed_authenticated_session_shapes_remain_parse_errors() {
+        for session in [
+            json!({ "accessToken": 42 }),
+            json!({ "accessToken": "" }),
+            json!({ "user": { "id": "user-123" } }),
+        ] {
+            assert!(matches!(
+                parse_session_credentials(&session),
+                Err(AppError::Parse(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn session_credentials_do_not_use_user_account_id_as_workspace_header() {
+        let credentials = parse_session_credentials(&json!({
+            "accessToken": "opaque-access-token",
+            "account": { "id": "user-account-id" }
+        }))
+        .expect("bearer-only session is allowed");
+
+        assert!(credentials.account_id.is_none());
+    }
+
+    #[test]
+    fn poll_snapshot_matches_the_session_that_started_it() {
+        let old_session = r#"{"cookie":"old","user_agent":"UA"}"#;
+        let mut applied = false;
+
+        assert!(transition_if_session_matches(
+            Some(old_session),
+            old_session,
+            || {
+                applied = true;
+            }
+        ));
+        assert!(applied);
+    }
+
+    #[test]
+    fn stale_poll_snapshot_is_skipped_after_logout() {
+        let old_session = r#"{"cookie":"old","user_agent":"UA"}"#;
+
+        // Logout removes the persisted credential while this request is in flight.
+        assert!(!session_matches_expected(None, old_session));
+    }
+
+    #[test]
+    fn stale_poll_snapshot_is_skipped_after_new_login() {
+        let old_session = r#"{"cookie":"old","user_agent":"UA"}"#;
+        let new_session = r#"{"cookie":"new","user_agent":"UA"}"#;
+
+        // The completed replacement login owns the persisted credential before this poll returns.
+        assert!(!session_matches_expected(Some(new_session), old_session));
+    }
+
+    #[test]
+    fn stale_poll_error_is_skipped_after_logout() {
+        let old_session = r#"{"cookie":"old","user_agent":"UA"}"#;
+        let mut marked_error = false;
+
+        assert!(!transition_if_session_matches(None, old_session, || {
+            marked_error = true;
+        }));
+        assert!(!marked_error);
+    }
+
+    #[test]
+    fn stale_poll_error_is_skipped_after_new_login() {
+        let old_session = r#"{"cookie":"old","user_agent":"UA"}"#;
+        let new_session = r#"{"cookie":"new","user_agent":"UA"}"#;
+        let mut marked_error = false;
+
+        assert!(!transition_if_session_matches(
+            Some(new_session),
+            old_session,
+            || {
+                marked_error = true;
+            },
+        ));
+        assert!(!marked_error);
+    }
+
+    #[test]
+    fn stored_session_preserves_browser_user_agent() {
+        let stored = CodexSession {
+            cookie: "session=value".to_string(),
+            user_agent: Some("Mozilla/5.0 Test WebView2".to_string()),
+        }
+        .encode()
+        .expect("stored session");
+        let decoded = CodexSession::decode(&stored).expect("decode stored session");
+
+        assert_eq!(decoded.cookie, "session=value");
+        assert_eq!(
+            decoded.user_agent.as_deref(),
+            Some("Mozilla/5.0 Test WebView2")
+        );
+    }
+
+    #[test]
+    fn legacy_raw_cookie_session_remains_readable() {
+        let decoded =
+            CodexSession::decode("session=value; cf_clearance=abc").expect("legacy cookie session");
+
+        assert_eq!(decoded.cookie, "session=value; cf_clearance=abc");
+        assert!(decoded.user_agent.is_none());
+    }
+
+    #[test]
+    fn accepts_only_structured_single_line_helper_cookie_transport() {
+        let session =
+            helper_session(r#"COOKIE {"cookie":"session=value","user_agent":"Browser UA"}"#)
+                .expect("valid helper session");
+        assert_eq!(session.cookie, "session=value");
+        assert_eq!(session.user_agent.as_deref(), Some("Browser UA"));
+        assert!(helper_session("COOKIE ").is_none());
+        assert!(helper_session("COOKIE {\"cookie\":\"session=value\\nnext\"}").is_none());
+        assert!(helper_session("CANCELLED").is_none());
     }
 
     #[test]

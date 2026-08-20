@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.0.2] - 2026-08-20
+
+### Fixed
+
+- **Codex sign-in completion**: verify the OAuth access token from `/api/auth/session`, then
+  revalidate quota with `Authorization`, `ChatGPT-Account-ID`, and `OAI-Product-Sku: codex`.
+  This replaces the cookie-only quota request that could leave a completed sign-in waiting for 290 seconds.
+- **Codex login-window closure**: replace synchronous helper cookie access with an asynchronous
+  WebView2 CookieManager callback and a 10-second deadline, so the window closes after sign-in.
+- **Codex expiry and race handling**: treat explicitly token-less signed-out sessions as logged
+  out, and prevent an older poll from deleting a newly saved session or overwriting its quota state.
+
 ## [1.0.1] - 2026-08-20
 
 ### Fixed

@@ -3,6 +3,18 @@
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르며, 버전은 [SemVer](https://semver.org/lang/ko/)를 따릅니다. 항목은 마이너 버전 단위로 묶습니다.
 
+## [1.0.2] - 2026-08-20
+
+### Fixed
+
+- **Codex 로그인 완료 감지**: ChatGPT 로그인 뒤 `/api/auth/session`의 OAuth access token을 확인하고,
+  `Authorization`·`ChatGPT-Account-ID`·`OAI-Product-Sku: codex` 헤더로 사용량을 재검증하도록 수정.
+  쿠키만으로 사용량을 요청해 로그인 완료 상태가 290초 동안 멈추던 문제 해결.
+- **Codex 로그인 창 종료**: helper UI 이벤트 루프에서 동기 쿠키 읽기를 제거하고 WebView2 비동기
+  CookieManager 콜백과 10초 제한 시간을 적용해, 로그인 후 창이 닫히지 않는 문제 수정.
+- **Codex 세션 만료·경합 처리**: 토큰 없는 명시적 로그아웃 응답은 로그아웃 상태로 전환하고,
+  이전 폴링 요청이 새 로그인 세션을 삭제하거나 새 사용량 상태를 덮어쓰지 않도록 세션 일치 검증 추가.
+
 ## [1.0.1] - 2026-08-20
 
 ### Fixed

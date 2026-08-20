@@ -262,7 +262,7 @@
           <p>
             설정에서 <b>Codex 로그인</b>을 선택하면 앱 본체와 분리된 전용 창에서 ChatGPT 로그인 화면이 열립니다.
             로그인 창에 문제가 발생해도 트레이·설정·위젯은 계속 동작합니다. 로그인 후
-            `chatgpt.com` 세션을 검증해 저장하고, Codex 구독의 주간 한도를 위젯·통계에 표시합니다.
+            `chatgpt.com` 세션을 비동기로 캡처하고 OAuth bearer로 검증해 저장한 뒤, Codex 구독의 주간 한도를 위젯·통계에 표시합니다.
             `primary_window`와 `secondary_window` 중 `limit_window_seconds`가 `604800`인 창만 사용하며,
             5시간 세션, OpenAI API 토큰 사용량·비용과 추가 모델별 한도는 표시하지 않습니다.
           </p>
@@ -552,7 +552,7 @@
                 <div class="aw-row">
                   <div>
                     <div class="aw-name">업데이트</div>
-                    <div class="aw-sub">현재 v1.0.1</div>
+                    <div class="aw-sub">현재 v1.0.2</div>
                   </div>
                   <button class="aw-btn" type="button">업데이트 확인</button>
                 </div>
@@ -574,8 +574,8 @@
             <li><b>Codex 사용량이 표시되지 않음</b>: ChatGPT 세션이 만료되었거나 비공개 사용량 응답이
               변경된 경우입니다. 설정에서 Codex를 로그아웃한 뒤 다시 로그인합니다. OpenAI API 사용량과
               비용은 지원 대상이 아닙니다.</li>
-            <li><b>Codex 로그인 창이 흰 화면이거나 닫힘</b>: 전용 로그인 프로세스가 안전하게 종료된 경우입니다.
-              설정에서 다시 로그인을 시도합니다. 이 경우에도 앱 본체의 트레이·설정·위젯은 계속 동작합니다.</li>
+            <li><b>Codex 로그인 완료 뒤 창이 닫히지 않음</b>: 로그인 창을 닫고 설정에서 다시 로그인합니다.
+              `v1.0.2`부터 세션 확인·쿠키 캡처에 각각 제한 시간을 적용하며, 앱 본체의 트레이·설정·위젯은 계속 동작합니다.</li>
             <li><b>Antigravity가 "실행 중"으로 표시되지 않음</b>: Antigravity IDE가 실제로 실행
               중인지 확인합니다. IDE의 로그인 포트·인증 토큰은 재시작마다 바뀌므로 SessionMeter가
               매번 다시 탐색하며, IDE를 새로 켰다면 다음 갱신 주기까지 잠시 기다립니다. 현재 Windows
