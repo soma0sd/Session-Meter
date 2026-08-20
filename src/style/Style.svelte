@@ -177,10 +177,16 @@
     void setWidgetVisible(service, visible);
   }
 
-  // Widget grid docking ("Placement" tab). Until the user has ever touched the order, it
-  // defaults locally to the current logged-in service list - the first edit (enabling,
-  // reordering, or changing columns) is what actually persists it.
-  const dockOrder = $derived(s && s.dock.order.length ? s.dock.order : loggedIn.map((x) => x.id));
+  // Widget grid docking ("Placement" tab). The saved order comes first, then any logged-in
+  // service missing from it - so a provider that appeared after the order was last written
+  // (a newly supported one, or one signed into just now) is listed and placed straight away
+  // instead of silently sitting outside the group. Until the user has ever touched the order
+  // this is simply the current logged-in list; the first edit (enabling, reordering, or
+  // changing columns) is what actually persists whichever list is showing.
+  const dockOrder = $derived.by(() => {
+    const saved = s?.dock.order ?? [];
+    return [...saved, ...loggedIn.map((x) => x.id).filter((id) => !saved.includes(id))];
+  });
 
   function saveDock(patch: Partial<DockConfigPatch>) {
     if (!s) return;

@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.0.3] - 2026-08-20
+
+### Fixed
+
+- **Compact widget more-menu (⋮)**: the popover was positioned against the window instead of the
+  widget panel, so an upward menu was clipped down to its last "Settings" row and took the usage
+  body with it. The menu now attaches just below the panel (above it when there is no room
+  below), never covers the body, and the window widens to keep item labels from being cut off.
+- **Codex widget grid docking**: a service signed into while the app was already running stayed
+  outside the docked group until the next restart. The Codex widget is now placed and moved with
+  the grid like the others, and appears in the Widget Style window's Placement list right away.
+
+### Changed
+
+- **Compact widget countdown**: shows `D:HH:MM` once more than 24 hours remain before a reset.
+  On Codex, whose headline window is a weekly quota, an unreadable `163:53` now reads `6:19:53`.
+
 ## [1.0.2] - 2026-08-20
 
 ### Fixed

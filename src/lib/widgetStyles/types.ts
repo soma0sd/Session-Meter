@@ -71,9 +71,9 @@ export function colorsFor(service: string): { m1: string; m2: string } {
 
 /** Small brand marks (raw inline SVG, sized for a 13x13 slot) identifying each service at a
  * glance - used in the widget title and the Placement tab's reorder list. Distinct
- * silhouettes: Claude a radial spark, Gemini a four-point sparkle, Antigravity an upward
- * chevron (a nod to "anti-gravity"). Shared between `Widget.svelte` and `Style.svelte` so
- * both stay in sync as services are added. */
+ * silhouettes: Claude a radial spark, Codex a hexagonal node, Gemini a four-point sparkle,
+ * Antigravity an upward chevron (a nod to "anti-gravity"). Shared between `Widget.svelte`
+ * and `Style.svelte` so both stay in sync as services are added. */
 export const serviceIcons: Record<string, string> = {
   claude: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1.7v12.6M1.7 8h12.6M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`,
   codex: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.1 8 1.8l5 2.3v7.8L8 14.2l-5-2.3Z"/><path d="m5.5 6.2 2.5 1.4 2.5-1.4M8 7.6v3"/></svg>`,

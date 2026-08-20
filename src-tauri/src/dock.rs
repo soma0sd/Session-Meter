@@ -11,7 +11,7 @@
 
 use std::sync::atomic::Ordering;
 
-use tauri::{AppHandle, Manager, PhysicalPosition};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 
 use crate::config::{self, DockConfig};
 use crate::state::AppState;
@@ -175,7 +175,20 @@ pub fn apply_layout(app: &AppHandle) {
         }
     }
 
+    // A widget showing an upward kebab popover has deliberately offset its own native window
+    // upward to make transparent room for it (see `Widget.svelte`'s `setNativeTopInset`), so
+    // snapping it back to its grid slot mid-popover would drag the visible panel down with it.
+    // Its cell still uses the pre-popover base size, so the rest of the group is unaffected,
+    // and closing the menu re-runs this layout to put it back exactly where it belongs.
+    let menus_open = app
+        .try_state::<AppState>()
+        .map(|s| s.widget_menus_open.lock().unwrap().clone())
+        .unwrap_or_default();
+
     for (id, x, y) in pack(app, &cfg, &members) {
+        if menus_open.contains(&id) {
+            continue;
+        }
         if let Some(win) = app.get_webview_window(&widget_label(&id)) {
             if matches!(win.is_minimized(), Ok(true)) {
                 let _ = win.unminimize();
@@ -268,6 +281,10 @@ pub fn on_membership_changed(app: &AppHandle, service: &str) {
     if changed {
         let snap = state.settings.lock().unwrap().clone();
         let _ = config::save(app, &snap);
+        // Broadcast, or the new member's own webview keeps `amIDocked` false and would still
+        // try a native single-window drag (which `on_widget_moved` then snaps back) until
+        // some unrelated settings change happened to refresh it.
+        let _ = app.emit("settings://changed", &snap);
     }
 }
 
