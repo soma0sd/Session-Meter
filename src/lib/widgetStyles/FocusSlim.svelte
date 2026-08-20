@@ -8,6 +8,7 @@
     displayMode,
     primaryPct,
     secondaryPct,
+    hasSecondary = true,
     primaryResetMs,
     secondaryResetMs,
     primaryLabel,
@@ -28,14 +29,16 @@
       </div>
       <div class="bar thick"><div class="fill p" style="width:{pShown}%"></div></div>
     </div>
-    <div class="metric">
-      <div class="head">
-        <span class="label sub">{secondaryLabel}</span>
-        <span class="val s">{sShown}%</span>
+    {#if hasSecondary}
+      <div class="metric">
+        <div class="head">
+          <span class="label sub">{secondaryLabel}</span>
+          <span class="val s">{sShown}%</span>
+        </div>
+        <div class="bar thin"><div class="fill s" style="width:{sShown}%"></div></div>
       </div>
-      <div class="bar thin"><div class="fill s" style="width:{sShown}%"></div></div>
-    </div>
-    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {primaryResetMs} {secondaryResetMs} />
+    {/if}
+    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {hasSecondary} {primaryResetMs} {secondaryResetMs} />
   </div>
 {:else}
   <div class="fs compact">
@@ -44,9 +47,13 @@
       <span class="val p">{pShown}%</span>
     </div>
     <div class="bar thick"><div class="fill p" style="width:{pShown}%"></div></div>
-    <div class="bar thin"><div class="fill s" style="width:{sShown}%"></div></div>
-    <div class="crow small">
-      <span class="val s">{sShown}%</span>
+    {#if hasSecondary}
+      <div class="bar thin"><div class="fill s" style="width:{sShown}%"></div></div>
+    {/if}
+    <div class="crow small" class:single={!hasSecondary}>
+      {#if hasSecondary}
+        <span class="val s">{sShown}%</span>
+      {/if}
       <span class="reset">{formatClock(primaryResetMs)}</span>
     </div>
   </div>
@@ -76,6 +83,9 @@
   }
   .crow.small {
     gap: 10px;
+  }
+  .crow.small.single {
+    justify-content: flex-end;
   }
   .label {
     font-size: 0.75rem;

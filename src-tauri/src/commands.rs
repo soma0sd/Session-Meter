@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
-use crate::api::{self, UsageSnapshot};
+use crate::api::UsageSnapshot;
 use crate::auth;
 use crate::config::{self, Settings};
 use crate::state::AppState;
@@ -262,7 +262,7 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
         .collect()
 }
 
-/// Open the login window for a service (Claude and Gemini only: Antigravity has no login at
+/// Open the login window for a service (Claude, Codex, and Gemini: Antigravity has no login at
 /// all, see `service::has_session`). Window creation is dispatched to the main thread
 /// (required on Windows).
 #[tauri::command]
@@ -273,13 +273,18 @@ pub fn open_login_window(app: AppHandle, service: Option<String>) -> Result<(), 
         crate::gemini::start_login(&app);
         return Ok(());
     }
-    // Claude: embedded claude.ai login webview.
+    // One browser-login capture may run at a time. Keep the visible page and its watcher intact
+    // rather than re-navigating it to another provider mid-capture.
     if let Some(win) = app.get_webview_window("login") {
-        let _ = win.set_focus();
-        return Ok(());
+        if matches!(win.is_visible(), Ok(true)) {
+            let _ = win.set_focus();
+            return Ok(());
+        }
     }
+    // Claude and Codex share a hidden-on-close webview. The helper re-navigates it only after
+    // its previous watcher has been cancelled by the close event.
     let app2 = app.clone();
-    app.run_on_main_thread(move || windows::create_login_window(&app2))
+    app.run_on_main_thread(move || windows::create_login_window(&app2, &service))
         .map_err(|e| e.to_string())
 }
 
@@ -290,11 +295,18 @@ pub async fn capture_session(
     service: Option<String>,
 ) -> Result<SessionStatus, String> {
     let service = crate::service::normalize(service.as_deref());
-    let cookie = auth::capture_cookie(&app).await.map_err(|e| e.to_string())?;
-    let snapshot = api::fetch_usage(&state.client, &cookie)
+    let cookie = auth::capture_cookie(&app, &service)
         .await
         .map_err(|e| e.to_string())?;
-    config::save_cookie(&app, &service, &cookie).map_err(|e| e.to_string())?;
+    let snapshot = crate::service::fetch_with_cookie(&service, &state.client, &cookie)
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Err(error) = config::save_cookie(&app, &service, &cookie) {
+        // Keep this public command fail-closed like the browser watcher: the snapshot must not
+        // become a signed-in UI state until the encrypted cookie has been persisted.
+        crate::usage::mark_status(&app, &service, "error");
+        return Err(error.to_string());
+    }
     eprintln!(
         "[cg] captured session: org='{}' buckets={}",
         snapshot.organization_name,
@@ -303,13 +315,21 @@ pub async fn capture_session(
 
     let org_name = snapshot.organization_name.clone();
     let email = snapshot.account_email.clone();
-    {
+    if service == crate::service::CLAUDE {
         let mut settings = state.settings.lock().unwrap();
         settings.org_name = org_name.clone();
         settings.account_email = email.clone();
         let _ = config::save(&app, &settings);
     }
     crate::usage::apply_snapshot(&app, snapshot);
+    let _ = app.emit(
+        "session://changed",
+        serde_json::json!({ "service": &service, "logged_in": true, "org_name": &org_name, "email": &email }),
+    );
+    let app_for_windows = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        windows::reconcile_widget_visibility(&app_for_windows);
+    });
 
     if let Some(win) = app.get_webview_window("login") {
         let _ = win.close();
@@ -324,12 +344,19 @@ pub async fn capture_session(
 #[tauri::command]
 pub fn clear_session(
     app: AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     service: Option<String>,
 ) -> Result<(), String> {
     let service = crate::service::normalize(service.as_deref());
     config::clear_cookie(&app, &service).map_err(|e| e.to_string())?;
-    state.last_snapshot.lock().unwrap().remove(&service);
+    crate::usage::mark_status(&app, &service, "not_logged_in");
+    if service != crate::service::CLAUDE {
+        windows::hide_runtime_widget(&app, &service);
+    }
+    let _ = app.emit(
+        "session://changed",
+        serde_json::json!({ "service": service, "logged_in": false, "org_name": "", "email": "" }),
+    );
     Ok(())
 }
 
@@ -439,6 +466,42 @@ pub fn set_widget_visible(
     let service = crate::service::normalize(service.as_deref());
     windows::apply_widget_visible(&app, &service, visible);
     Ok(())
+}
+
+/// Report a widget's normal physical panel size. The browser reports this after each regular
+/// content resize so a temporary menu popover never changes the dock grid dimensions.
+#[tauri::command]
+pub fn set_widget_base_size(
+    state: State<'_, AppState>,
+    service: String,
+    width: i32,
+    height: i32,
+) {
+    if width >= 40 && height >= 30 {
+        state
+            .widget_base_sizes
+            .lock()
+            .unwrap()
+            .insert(crate::service::normalize(Some(&service)), (width, height));
+    }
+}
+
+/// Mark a widget's compact kebab popover as open or closed. Docking reads the last normal
+/// panel size while this flag is set, keeping neighboring widgets fixed in place.
+#[tauri::command]
+pub fn set_widget_menu_open(app: AppHandle, state: State<'_, AppState>, service: String, open: bool) {
+    let service = crate::service::normalize(Some(&service));
+    {
+        let mut menus = state.widget_menus_open.lock().unwrap();
+        if open {
+            menus.insert(service.clone());
+        } else {
+            menus.remove(&service);
+        }
+    }
+    if !open {
+        crate::dock::apply_layout(&app);
+    }
 }
 
 // --- widget grid docking ---

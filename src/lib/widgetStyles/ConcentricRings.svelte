@@ -8,6 +8,7 @@
     displayMode,
     primaryPct,
     secondaryPct,
+    hasSecondary = true,
     primaryResetMs,
     secondaryResetMs,
     primaryLabel,
@@ -29,8 +30,10 @@
 <div class="cr" class:compact={variant === "compact"}>
   <div class="ringwrap">
     <svg viewBox="0 0 100 100">
-      <circle class="track" cx="50" cy="50" r={OUTER_R} stroke-width="6" />
-      <circle class="s" cx="50" cy="50" r={OUTER_R} stroke-width="6" stroke-dasharray={OUTER_C} stroke-dashoffset={outerOff} transform="rotate(-90 50 50)" />
+      {#if hasSecondary}
+        <circle class="track" cx="50" cy="50" r={OUTER_R} stroke-width="6" />
+        <circle class="s" cx="50" cy="50" r={OUTER_R} stroke-width="6" stroke-dasharray={OUTER_C} stroke-dashoffset={outerOff} transform="rotate(-90 50 50)" />
+      {/if}
       <circle class="track" cx="50" cy="50" r={INNER_R} stroke-width="8" />
       <circle class="p" cx="50" cy="50" r={INNER_R} stroke-width="8" stroke-dasharray={INNER_C} stroke-dashoffset={innerOff} transform="rotate(-90 50 50)" />
     </svg>
@@ -44,11 +47,13 @@
   </div>
 
   {#if variant === "detailed"}
-    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {primaryResetMs} {secondaryResetMs} />
+    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {hasSecondary} {primaryResetMs} {secondaryResetMs} />
   {:else}
     <div class="side">
       <span class="sp">{pShown}%</span>
-      <span class="ss">{sShown}%</span>
+      {#if hasSecondary}
+        <span class="ss">{sShown}%</span>
+      {/if}
     </div>
   {/if}
 </div>

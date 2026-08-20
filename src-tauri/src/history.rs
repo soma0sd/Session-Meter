@@ -14,9 +14,9 @@ use crate::state::AppState;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HistoryPoint {
     pub at: String,
-    /// Remaining% of the service's primary window (Claude: 5-hour).
+    /// Remaining% of the service's primary window. The legacy name is not a duration claim.
     pub five_hour: Option<u8>,
-    /// Remaining% of the service's secondary window (Claude: weekly).
+    /// Remaining% of the service's secondary window when available.
     pub weekly: Option<u8>,
 }
 
@@ -104,4 +104,16 @@ pub fn load(app: &AppHandle, service: &str) -> Vec<HistoryPoint> {
         .filter_map(|l| serde_json::from_str::<HistoryPoint>(l).ok())
         .filter(|p| parse_iso(&p.at).map(|t| t >= cutoff).unwrap_or(false))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn history_files_stay_service_scoped() {
+        assert_eq!(super::history_file(crate::service::CLAUDE), "history.jsonl");
+        assert_eq!(
+            super::history_file(crate::service::CODEX),
+            "history.codex.jsonl"
+        );
+    }
 }

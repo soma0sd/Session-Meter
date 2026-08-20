@@ -1,75 +1,81 @@
 # 데이터 능력
 
-SessionMeter가 Claude 사용량에 대해 얻을 수 있는 것과 없는 것, 그리고 그 사용 방식을 정리합니다.
+SessionMeter가 서비스별 사용량에 대해 얻을 수 있는 정보, 범위 밖 정보, 세션 처리 방식을 정리합니다.
 
-## 출처
+## 서비스별 데이터 출처
 
-SessionMeter는 **claude.ai의 비공개 웹 API**에서 데이터를 읽으며, 로그인 창에서 확보한 브라우저
-세션 쿠키로 인증합니다. 이는 claude.ai 사용량 페이지가 보여 주는 것과 동일한 데이터입니다.
-공식/공개 API가 **아니며**, Anthropic Admin/Usage API도 **아닙니다**.
+| 서비스 | 출처와 인증 | 지원 범위 |
+| --- | --- | --- |
+| Claude | `claude.ai` 비공개 웹 API와 앱 내 로그인 창에서 확보한 브라우저 세션 쿠키 | 5시간·주간 및 응답에서 발견되는 사용량 버킷 |
+| Codex | `chatgpt.com` 비공개 사용량 엔드포인트와 앱 내 ChatGPT 로그인 세션 쿠키 | `limit_window_seconds`가 `604800`인 Codex 주간 한도만 |
+| Gemini | `gemini.google.com/usage` 화면 스크래핑과 별도 프로세스 로그인 창 | 화면에 표시되는 구독 사용량, 실험적 기능 |
+| Antigravity IDE | 실행 중인 IDE의 비공개 로컬 loopback API | Gemini 및 Claude/GPT 모델군의 코딩 쿼터, Windows 전용 |
 
-요청 흐름:
+Claude·Codex·Gemini의 연동은 공식 또는 공개 API가 아닙니다. Antigravity IDE 연동도 문서화되지 않은
+로컬 인터페이스입니다. 서비스 정책이나 응답 구조가 바뀌면 로그인 또는 조회가 실패할 수 있습니다.
 
-1. `GET https://claude.ai/api/organizations` → 첫 조직의 `uuid`(및 `name`).
-2. `GET https://claude.ai/api/organizations/{uuid}/usage`.
+## Claude 구독 사용량
 
-claude.ai 전체 쿠키 문자열과 데스크톱 User-Agent로 전송하며, `401/403`은 세션 만료로 처리합니다.
+Claude 요청 흐름:
 
-## 얻는 필드(현재 방식)
+1. `GET https://claude.ai/api/organizations`으로 첫 조직의 `uuid`와 이름 조회
+2. `GET https://claude.ai/api/organizations/{uuid}/usage`으로 사용량 조회
+3. `GET https://claude.ai/api/account`으로 표시명과 이메일 조회
 
-사용량 응답은 **동적으로** 파싱합니다. `utilization`(사용률 %, 0~100)과 `resets_at`(ISO-8601)을
-가진 최상위 객체를 모두 사용량 "버킷"으로 수집하므로, 잘 알려진 두 항목 외의 한도도 자동으로
-나타납니다.
+`claude.ai` 전체 쿠키 문자열과 데스크톱 User-Agent로 요청하며, `401/403`은 세션 만료로 처리합니다.
+응답은 고정 스키마가 아닌 `{utilization, resets_at}` 형태를 동적으로 파싱합니다.
 
 | 필드 | 의미 | 사용처 |
 | --- | --- | --- |
-| `five_hour.utilization` / `resets_at` | 5시간 세션 사용률 % + 초기화 시각 | 트레이·위젯·통계 |
-| `seven_day.utilization` / `resets_at` | 주간(7일) 사용률 % + 초기화 시각 | 위젯·통계 |
-| 기타 `{utilization, resets_at}` | 예: 모델군별 주간 한도(있는 경우) | 추가 버킷으로 표시 |
-| `organization_name` | 계정/조직 라벨 | 표시 |
-| organizations[0].`uuid` / `name` | 조직 식별 | 요청 + 폴백 라벨 |
-| `/account`의 표시명·이메일 | 계정 이름·이메일 | 설정 계정 패널 |
+| `five_hour.utilization` / `resets_at` | 5시간 세션 사용률 %와 초기화 시각 | 트레이·위젯·통계 |
+| `seven_day.utilization` / `resets_at` | 주간 사용률 %와 초기화 시각 | 위젯·통계 |
+| 기타 `{utilization, resets_at}` | 예: 모델군별 주간 한도 | 추가 버킷 표시 |
+| `organization_name`, 계정 표시명·이메일 | 계정 라벨 | 설정 계정 패널 |
 
-이로부터 SessionMeter가 계산하는 값:
+## Codex 구독 사용량
 
-- **남은 사용량 %** = 버킷별 `max(0, 100 - utilization)`.
-- **초기화까지 남은 시간**: `resets_at` 기준 실시간 카운트다운.
-- **로컬 사용 이력**(폴마다 1개 표본), 설정한 일수만큼 보관.
-- **소진 예측**: 최근 이력의 선형 추세로 현재 속도에서 0%에 도달하는 시점을 추정해 초기화 시각과 비교.
+Codex 요청 흐름:
 
-> 추가 필드의 정확한 집합은 계정에 따라 다르고, 엔드포인트가 비문서화이므로 바뀔 수 있습니다.
-> SessionMeter는 고정 스키마 대신 `{utilization, resets_at}` 형태를 동적으로 파싱해, 새 필드나 이름
-> 변경에도 깨지지 않고 우아하게 처리합니다.
+1. 앱 내 `https://chatgpt.com/auth/login` 창에서 본인 ChatGPT 계정 로그인
+2. `GET https://chatgpt.com/backend-api/wham/usage`으로 구독 한도 조회
 
-## 요구 범위를 넘어 제공하는 것
+`chatgpt.com` 세션 쿠키와 `OAI-App-Brand: codex` 요청 헤더를 사용합니다. 응답의 `401/403`은
+세션 만료로 처리하며, 새 로그인 전까지 기존 정상 스냅샷을 보존합니다. 이 엔드포인트와 쿠키 형식은
+공개 계약이 아닙니다.
 
-- **모든 사용 버킷**(5시간·주간뿐 아니라 동적 파싱으로 발견되는 항목, 예: 모델군별 주간 한도).
-- **사용 이력 + 추세 차트**(로컬 표본 기반).
-- **소진 예측**(로컬 계산; API가 제공하지 않음).
-- **임계값·초기화 알림**(사용률 + `resets_at` 기반).
+| 필드 | 의미 | 사용처 |
+| --- | --- | --- |
+| `rate_limit.primary_window` / `secondary_window`의 `used_percent` / `reset_at` | `limit_window_seconds`가 `604800`인 창의 Codex 주간 사용률 %와 초기화 Unix 시각 | 트레이·위젯·통계 |
+| `rate_limit.primary_window` / `secondary_window`의 `limit_window_seconds` | 한도 창 길이 | `604800`초 주간 창만 선택 |
+| `plan_type` | 응답이 제공하는 ChatGPT 플랜 식별자 | 설정 계정 패널 |
 
-## 제공하지 않음 / 범위 밖
+Codex 표시 값은 `primary_window`와 `secondary_window` 중 `limit_window_seconds`가 `604800`인 주간 창만
+사용합니다. 서버가 반환한 사용률을 0부터 100까지 정규화해 남은 사용량 `%`와 초기화까지 남은 시간으로
+변환합니다. 5시간 창과 그 밖의 추가 창은 표시하거나 이력에 저장하지 않습니다.
 
-- **공식 구독 세션 API**: Anthropic은 5시간·주간 세션 한도에 대한 문서화된 공개 API를 제공하지
-  않으며, 수치는 의도적으로 공개 API로 노출되지 않습니다. 위 claude.ai 내부 엔드포인트가 유일한
-  프로그램적 출처입니다.
-- **공식 Admin(Usage & Cost) API**(`/v1/organizations/usage_report/messages`,
-  `/v1/organizations/cost_report`): 이는 *다른 지표*로, 개발자 **API** 토큰 소비량과 USD 비용이며
-  Admin API 키(`sk-ant-admin...`)가 필요합니다. 구독/Claude Code 세션 잔량은 포함하지 **않습니다**.
-- **정확한 토큰 수 / 한도**: 클라이언트는 서버가 계산한 사용률(%)만 보며, 원시 토큰 수나 내부 한도값은
-  보지 못합니다.
+## 공통 계산과 범위
+
+- **남은 사용량 %**: 버킷별 `max(0, 100 - utilization)`
+- **초기화까지 남은 시간**: 서비스 응답의 초기화 시각 기준 실시간 카운트다운
+- **로컬 사용 이력·소진 예측·알림**: 폴링 표본과 설정 기준으로 앱에서 계산
+- **Codex 범위 제외**: 5시간 세션, OpenAI API 토큰 사용량·비용·조직 사용량, 별도 모델별 한도 및 `604800`초가 아닌 추가 한도 창
+- **Claude 범위 제외**: Anthropic Admin API의 개발자 API 토큰 사용량·USD 비용, 원시 토큰 수와 내부 한도값
+- **공식 API 대체 아님**: 각 서비스의 구독 세션 한도와 개발자 API 사용량은 서로 다른 지표
 
 ## 세션 저장·보안
 
-확보한 claude.ai 세션 쿠키는 이 앱의 유일한 비밀입니다. 설정 저장소와 분리된 사용자별 파일
-(`session.dat`)에 OS 애플리케이션 데이터 폴더에 저장되며, `claude.ai`로만 HTTPS 전송됩니다.
+브라우저 로그인 서비스의 쿠키는 설정 파일과 분리된 OS 애플리케이션 데이터 폴더에 서비스별로 저장됩니다.
+Claude는 기존 세션 호환성을 위해 `session.dat`, Codex는 `session.codex.dat`, Gemini는
+`session.gemini.dat`를 사용합니다. 쿠키는 각 서비스의 HTTPS 요청에만 전송되며, Antigravity IDE는
+로컬 loopback API만 사용하므로 브라우저 세션을 저장하지 않습니다.
 
-- **Windows에서는 저장 시 암호화.** `session.dat`는 Windows DPAPI(사용자 범위)로 보호되어 오프라인
-  디스크·옮겨진 백업·다른 사용자 계정에서 복호화할 수 없습니다. 현재 사용자로 복호화되지 않는 데이터는
-  폐기하고 재로그인을 요청합니다.
-- **기타 플랫폼에서는 평문.** 쿠키 문자열이 OS 키링의 항목 크기 한도를 넘기 때문에, macOS/Linux
-  (best-effort)에서는 현재 사용자 범위 평문 파일이며 OS 시크릿 서비스 연동은 예정입니다.
-- **같은 사용자 주의.** 어느 플랫폼이든 로그인 상태에서 같은 사용자로 실행 중인 프로세스는 활성 세션을
-  읽을 수 있는데, 이는 브라우저의 쿠키 저장 방식과 같습니다.
-- **수명.** 로그아웃(`clear_session`)하면 파일이 삭제됩니다. 릴리스 빌드는 원시 API 응답을 디스크에
-  저장하지 않습니다.
+- **Windows 암호화**: 모든 브라우저 세션 파일을 사용자 범위 Windows DPAPI로 보호. 다른 사용자·오프라인
+  디스크·복사된 백업에서는 복호화 불가
+- **기타 플랫폼**: 현재 사용자 범위 평문 파일. OS 시크릿 서비스 연동 예정
+- **같은 사용자 주의**: 로그인 상태에서 같은 사용자로 실행 중인 프로세스는 활성 세션에 접근 가능. 브라우저
+  쿠키 저장 방식과 같은 보안 경계
+- **세션 수명**: 서비스별 로그아웃 시 해당 파일 삭제. 릴리스 빌드는 원시 API 응답을 디스크에 저장하지 않음
+
+로그인·사용량 조회·업데이트 확인을 위한 서비스 및 배포 서버 통신 외에 사용 데이터를 수집하거나
+전송하지 않습니다. 사용 전 해당 서비스의 이용약관을 확인하고 본인 계정 또는 본인 PC의 IDE로만
+사용해야 합니다.

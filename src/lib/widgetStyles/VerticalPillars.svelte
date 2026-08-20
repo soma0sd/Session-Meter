@@ -8,6 +8,7 @@
     displayMode,
     primaryPct,
     secondaryPct,
+    hasSecondary = true,
     primaryResetMs,
     secondaryResetMs,
     primaryLabel,
@@ -22,15 +23,19 @@
 <div class="vp" class:compact={variant === "compact"}>
   <div class="pillars">
     <div class="pillar primary"><div class="fill p" style="height:{clamp(pShown)}%"></div></div>
-    <div class="pillar secondary"><div class="fill s" style="height:{clamp(sShown)}%"></div></div>
+    {#if hasSecondary}
+      <div class="pillar secondary"><div class="fill s" style="height:{clamp(sShown)}%"></div></div>
+    {/if}
   </div>
 
   {#if variant === "detailed"}
-    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {primaryResetMs} {secondaryResetMs} />
+    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {hasSecondary} {primaryResetMs} {secondaryResetMs} />
   {:else}
     <div class="side">
       <span class="sp">{pShown}%</span>
-      <span class="ss">{sShown}%</span>
+      {#if hasSecondary}
+        <span class="ss">{sShown}%</span>
+      {/if}
       <span class="rst">{formatClock(primaryResetMs)}</span>
     </div>
   {/if}

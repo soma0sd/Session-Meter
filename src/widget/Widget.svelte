@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { onMount, onDestroy, tick } from "svelte";
+  import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { t } from "../lib/i18n";
   import { initWindow } from "../lib/appinit";
@@ -19,6 +19,8 @@
     dockMoveTo,
     dockMoveEnd,
     dockRelayout,
+    setWidgetBaseSize,
+    setWidgetMenuOpen,
     type UsageSnapshot,
     type Settings,
     type UpdateInfo,
@@ -34,6 +36,7 @@
 
   const SERVICE_NAMES: Record<string, string> = {
     claude: "Claude",
+    codex: "Codex",
     gemini: "Gemini",
     antigravity_ide: "Antigravity",
   };
@@ -86,15 +89,22 @@
   let updateInfo = $state<UpdateInfo | null>(null);
   let updating = $state(false);
   let menuOpen = $state(false);
+  let menuOpensUp = $state(false);
+  let menuTopInset = $state(0);
   let bodyWidth = $state(0);
   // Show the icon row inline when the content is wide enough; otherwise collapse to a menu.
   const collapsed = $derived(bodyWidth > 0 && bodyWidth < ICON_ROW_MIN);
 
   let panelEl: HTMLElement | undefined;
+  let menuEl = $state<HTMLElement | undefined>(undefined);
   let bodyEl = $state<HTMLElement | undefined>(undefined);
   let ro: ResizeObserver | undefined;
   let timer: number | undefined;
   let unlisteners: Array<() => void> = [];
+  let reportedBaseSize: [number, number] | undefined;
+  let reportedMenuOpen: boolean | undefined;
+  let nativeTopInsetPx = 0;
+  let fitRevision = 0;
 
   function applySettings(s: Settings) {
     const wc = widgetConfig(s, myService);
@@ -131,22 +141,112 @@
     return undefined;
   }
 
-  // Size the window to hug the panel content (width + height), so a compact style makes a
-  // small widget and text never has to wrap.
+  async function reportBaseSize(width: number, height: number) {
+    const physical: [number, number] = [
+      Math.round(width * (window.devicePixelRatio || 1)),
+      Math.round(height * (window.devicePixelRatio || 1)),
+    ];
+    if (reportedBaseSize?.[0] === physical[0] && reportedBaseSize?.[1] === physical[1]) return;
+    try {
+      await setWidgetBaseSize(myService, physical[0], physical[1]);
+      reportedBaseSize = physical;
+    } catch {
+      /* preview */
+    }
+  }
+
+  async function reportMenuOpen(open: boolean) {
+    if (reportedMenuOpen === open) return;
+    try {
+      await setWidgetMenuOpen(myService, open);
+      reportedMenuOpen = open;
+    } catch {
+      /* preview */
+    }
+  }
+
+  async function preferUpwardMenu(panelH: number): Promise<boolean> {
+    if (!menuEl) return false;
+    try {
+      const [position, monitor] = await Promise.all([
+        getCurrentWindow().outerPosition(),
+        currentMonitor(),
+      ]);
+      if (!monitor) return false;
+      const scale = monitor.scaleFactor || window.devicePixelRatio || 1;
+      const workArea = monitor.workArea;
+      const menuH = menuEl.getBoundingClientRect().height;
+      const downExtra = Math.max(0, Math.ceil((34 + menuH - panelH) * scale));
+      const upExtra = Math.max(0, Math.ceil((menuH - 34) * scale));
+      const availableBelow = workArea.position.y + workArea.size.height - (position.y + Math.ceil(panelH * scale));
+      const availableAbove = position.y - workArea.position.y;
+      return downExtra > availableBelow && availableAbove >= upExtra;
+    } catch {
+      return false;
+    }
+  }
+
+  async function setNativeTopInset(inset: number) {
+    const nextInsetPx = Math.round(inset * (window.devicePixelRatio || 1));
+    const delta = nextInsetPx - nativeTopInsetPx;
+    if (!delta) return;
+    const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
+    const appWindow = getCurrentWindow();
+    const position = await appWindow.outerPosition();
+    await appWindow.setPosition(new PhysicalPosition(position.x, position.y - delta));
+    nativeTopInsetPx = nextInsetPx;
+  }
+
+  // Size the native window to the visual union of the normal panel and absolute popover.
+  // An upward menu receives transparent top space and shifts its native window by the same
+  // amount, so the panel's desktop coordinates remain fixed while the popover stays visible.
   async function fitWindow() {
     if (!panelEl) return;
+    const revision = ++fitRevision;
     if (bodyEl) bodyWidth = Math.ceil(bodyEl.getBoundingClientRect().width);
-    const r = panelEl.getBoundingClientRect();
-    const w = Math.min(MAX_W, Math.ceil(r.width));
-    const h = Math.ceil(r.height);
-    if (w < 40 || h < 30) return;
+    let r = panelEl.getBoundingClientRect();
+    const panelW = Math.min(MAX_W, Math.ceil(r.width));
+    const panelH = Math.ceil(r.height);
+    if (panelW < 40 || panelH < 30) return;
+    await reportBaseSize(panelW, panelH);
+    if (revision !== fitRevision) return;
+
+    const shouldOpenUp = menuOpen && (await preferUpwardMenu(panelH));
+    if (revision !== fitRevision) return;
+    if (menuOpensUp !== shouldOpenUp) {
+      menuOpensUp = shouldOpenUp;
+      await tick();
+      if (revision !== fitRevision || !panelEl) return;
+      r = panelEl.getBoundingClientRect();
+    }
+
+    const menuRect = menuOpen && menuEl ? menuEl.getBoundingClientRect() : undefined;
+    const desiredTopInset = menuRect && menuOpensUp ? Math.max(0, Math.ceil(r.top - menuRect.top)) : 0;
+    if (menuTopInset !== desiredTopInset) {
+      menuTopInset = desiredTopInset;
+      await tick();
+      if (revision !== fitRevision || !panelEl) return;
+      r = panelEl.getBoundingClientRect();
+    }
+
+    const popover = menuOpen && menuEl ? menuEl.getBoundingClientRect() : undefined;
+    const visualTop = popover ? Math.min(r.top, popover.top) : r.top;
+    const visualBottom = popover ? Math.max(r.bottom, popover.bottom) : r.bottom;
+    const w = panelW;
+    const h = Math.max(panelH, Math.ceil(visualBottom - visualTop));
     try {
       const { LogicalSize } = await import("@tauri-apps/api/dpi");
+      // Mark the popover before enlarging the webview so the dock never observes a larger cell.
+      if (menuOpen) await reportMenuOpen(true);
+      if (revision !== fitRevision) return;
+      await setNativeTopInset(menuTopInset);
       await getCurrentWindow().setSize(new LogicalSize(w, h));
-      // Content resized (style switch, DPI change, kebab toggle, ...): ask the dock layout
-      // to re-run now that the live outer_size Rust reads back has actually changed. A no-op
-      // when this widget isn't part of an enabled docked group.
-      void dockRelayout().catch(() => {});
+      if (revision !== fitRevision) return;
+      // Report close after shrinking, preventing a watchdog tick from briefly reflowing docks.
+      if (!menuOpen) {
+        await reportMenuOpen(false);
+        void dockRelayout().catch(() => {});
+      }
     } catch {
       /* not in Tauri */
     }
@@ -157,7 +257,7 @@
     if (!collapsed) menuOpen = false;
   });
 
-  // Re-fit when the style, header layout, or the (in-flow) menu changes the content size.
+  // Re-fit when the style, header layout, or popover visibility changes the visual bounds.
   $effect(() => {
     style;
     menuOpen;
@@ -230,6 +330,7 @@
     if (timer) clearInterval(timer);
     ro?.disconnect();
     unlisteners.forEach((u) => u());
+    if (reportedMenuOpen) void setWidgetMenuOpen(myService, false).catch(() => {});
   });
 
   async function toggleAoT() {
@@ -272,6 +373,7 @@
     // A click on the panel background (not a control) closes an open menu and starts a drag.
     if (menuOpen && !target.closest(".menu") && !target.closest(".kebab")) menuOpen = false;
     if (moveLocked || e.button !== 0) return;
+    if (target.closest(".menu")) return;
     if (target.closest("button")) return;
 
     if (amIDocked) {
@@ -384,14 +486,16 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-  class="panel"
-  bind:this={panelEl}
-  onpointerdown={startDrag}
-  onpointermove={onDragMove}
-  onpointerup={endDrag}
-  onpointercancel={endDrag}
-  onlostpointercapture={endDrag}>
+<div class="widget-surface" style:padding-top={menuTopInset ? `${menuTopInset}px` : undefined}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="panel"
+    bind:this={panelEl}
+    onpointerdown={startDrag}
+    onpointermove={onDragMove}
+    onpointerup={endDrag}
+    onpointercancel={endDrag}
+    onlostpointercapture={endDrag}>
   <header>
     <span class="title">
       {#if SERVICE_ICONS[myService]}<span class="svc-icon">{@html SERVICE_ICONS[myService]}</span>{/if}
@@ -423,8 +527,8 @@
     {/if}
   </header>
 
-  {#if collapsed && menuOpen}
-    <div class="menu">
+    {#if collapsed && menuOpen}
+      <div class="menu" class:up={menuOpensUp} bind:this={menuEl}>
       {#if updateInfo?.available}
         <button class="mitem accent" disabled={updating} onclick={() => nav(doUpdate)}>
           {@html UPDATE}<span>{$t("widget.update", { version: updateInfo.version })}</span>
@@ -445,33 +549,39 @@
       <button class="mitem" onclick={() => nav(openSettings)}>
         {@html GEAR}<span>{$t("common.settings")}</span>
       </button>
-    </div>
-  {/if}
+      </div>
+    {/if}
 
-  {#if snap === null}
-    <div class="empty">{$t("common.loading")}</div>
-  {:else if snap.status !== "ok"}
-    <div class="empty">
-      {snap.status === "unauthorized"
-        ? $t("common.sessionExpired")
-        : snap.status === "not_running"
-          ? $t("common.antigravityNotRunning")
-          : $t("common.notLoggedIn")}
-    </div>
-  {:else}
-    <div class="body" bind:this={bodyEl}>
-      <WidgetStyle
-        styleId={style}
-        snapshot={snap}
-        {now}
-        {displayMode}
-        {primaryKeyOverride}
-        {secondaryKeyOverride} />
-    </div>
-  {/if}
+    {#if snap === null}
+      <div class="empty">{$t("common.loading")}</div>
+    {:else if snap.status !== "ok"}
+      <div class="empty">
+        {snap.status === "unauthorized"
+          ? $t("common.sessionExpired")
+          : snap.status === "not_running"
+            ? $t("common.antigravityNotRunning")
+            : snap.status === "error"
+              ? $t("common.usageUnavailable")
+              : $t("common.notLoggedIn")}
+      </div>
+    {:else}
+      <div class="body" bind:this={bodyEl}>
+        <WidgetStyle
+          styleId={style}
+          snapshot={snap}
+          {now}
+          {displayMode}
+          {primaryKeyOverride}
+          {secondaryKeyOverride} />
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
+  .widget-surface {
+    display: block;
+  }
   .panel {
     display: flex;
     flex-direction: column;
@@ -486,7 +596,7 @@
     border-radius: 12px;
     user-select: none;
     cursor: default;
-    overflow: hidden;
+    overflow: visible;
   }
   header {
     display: flex;
@@ -560,14 +670,24 @@
     opacity: 0.6;
   }
   .menu {
+    position: absolute;
+    z-index: 10;
+    top: 34px;
+    left: 10px;
+    right: 10px;
     display: flex;
     flex-direction: column;
     gap: 1px;
-    margin-bottom: 7px;
     padding: 3px;
     border: 1px solid rgb(var(--border));
     border-radius: 8px;
     background: rgb(var(--panel));
+    box-shadow: 0 8px 22px rgb(0 0 0 / 0.22);
+  }
+  .menu.up {
+    top: auto;
+    bottom: calc(100% - 34px);
+    box-shadow: 0 -8px 22px rgb(0 0 0 / 0.22);
   }
   .mitem {
     display: flex;

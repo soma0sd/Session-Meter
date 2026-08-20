@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.0.0] - 2026-08-20
+
+### Added
+
+- **Codex subscription quota**: sign in with a ChatGPT account to view the Codex weekly limit
+  in the tray, widgets, statistics, and history. The 5-hour session, OpenAI API token usage,
+  cost, and additional model-specific limits are excluded.
+
+### Changed
+
+- **Compact widget more-menu overlay**: the menu now opens as a popover over the usage body, so
+  opening it does not shift the body or adjacent docked widgets.
+
 ## [0.5.1] - 2026-07-23
 
 ### Fixed

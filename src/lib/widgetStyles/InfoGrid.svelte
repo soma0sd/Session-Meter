@@ -2,13 +2,14 @@
   import { locale, t } from "../i18n";
   import { formatCountdown } from "../countdown";
 
-  // The two-column info panel used by the "detailed" style variants (matches the demo's
-  // info-split-grid): one block per window, each with its usage% and time-until-reset.
+  // The detailed-style info panel: one block per window, collapsing to the primary block when
+  // the snapshot has no secondary window.
   let {
     primaryLabel,
     secondaryLabel,
     pShown,
     sShown,
+    hasSecondary = true,
     primaryResetMs,
     secondaryResetMs,
   }: {
@@ -16,13 +17,14 @@
     secondaryLabel: string;
     pShown: number;
     sShown: number;
+    hasSecondary?: boolean;
     primaryResetMs: number;
     secondaryResetMs: number;
   } = $props();
 </script>
 
-<div class="grid">
-  <div class="block br">
+<div class="grid" class:single={!hasSecondary}>
+  <div class="block" class:br={hasSecondary}>
     <div class="btitle">{primaryLabel}</div>
     <div class="item">
       <span class="k">{$t("widgetStyle.usage")}</span>
@@ -33,17 +35,19 @@
       <span class="v">{formatCountdown(primaryResetMs, $locale)}</span>
     </div>
   </div>
-  <div class="block">
-    <div class="btitle">{secondaryLabel}</div>
-    <div class="item">
-      <span class="k">{$t("widgetStyle.usage")}</span>
-      <span class="v s">{sShown}%</span>
+  {#if hasSecondary}
+    <div class="block">
+      <div class="btitle">{secondaryLabel}</div>
+      <div class="item">
+        <span class="k">{$t("widgetStyle.usage")}</span>
+        <span class="v s">{sShown}%</span>
+      </div>
+      <div class="item">
+        <span class="k">{$t("widgetStyle.resetIn")}</span>
+        <span class="v">{formatCountdown(secondaryResetMs, $locale)}</span>
+      </div>
     </div>
-    <div class="item">
-      <span class="k">{$t("widgetStyle.resetIn")}</span>
-      <span class="v">{formatCountdown(secondaryResetMs, $locale)}</span>
-    </div>
-  </div>
+  {/if}
 </div>
 
 <style>
@@ -56,6 +60,9 @@
     border-radius: 10px;
     padding: 8px 10px;
     flex: 1;
+  }
+  .grid.single {
+    grid-template-columns: 1fr;
   }
   .block {
     display: flex;

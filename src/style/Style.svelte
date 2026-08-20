@@ -34,10 +34,27 @@
   let unlisteners: Array<() => void> = [];
 
   function placeholder(service: string): UsageSnapshot {
+    const codex = service === "codex";
+    const resetIn = new Date(Date.now() + 4 * 86_400_000).toISOString();
+    if (codex) {
+      return {
+        service_id: service,
+        five_hour: { remaining: 35, utilization: 65, resets_at: resetIn },
+        weekly_primary: null,
+        primary_key: "codex-weekly",
+        secondary_key: null,
+        buckets: [],
+        organization_name: "",
+        account_email: "",
+        subscription: "",
+        fetched_at: "",
+        status: "ok",
+      };
+    }
     return {
       service_id: service,
       five_hour: { remaining: 54, utilization: 46, resets_at: new Date(Date.now() + 2 * 3600_000).toISOString() },
-      weekly_primary: { remaining: 35, utilization: 65, resets_at: new Date(Date.now() + 4 * 86_400_000).toISOString() },
+      weekly_primary: { remaining: 35, utilization: 65, resets_at: resetIn },
       primary_key: "five_hour",
       secondary_key: "seven_day",
       buckets: [],
