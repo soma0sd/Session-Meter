@@ -8,6 +8,7 @@
     displayMode,
     primaryPct,
     secondaryPct,
+    hasSecondary = true,
     primaryResetMs,
     secondaryResetMs,
     primaryLabel,
@@ -29,18 +30,22 @@
     <svg viewBox="0 0 100 56">
       <path class="track" d="M5 50 A45 45 0 0 1 95 50" stroke-width="6" />
       <path class="p" d="M5 50 A45 45 0 0 1 95 50" stroke-width="6" stroke-dasharray={OUTER_LEN} stroke-dashoffset={outerOff} />
-      <path class="track" d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" />
-      <path class="s" d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" stroke-dasharray={INNER_LEN} stroke-dashoffset={innerOff} />
+      {#if hasSecondary}
+        <path class="track" d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" />
+        <path class="s" d="M17 50 A33 33 0 0 1 83 50" stroke-width="6" stroke-dasharray={INNER_LEN} stroke-dashoffset={innerOff} />
+      {/if}
     </svg>
     <div class="center">{formatClock(primaryResetMs)}</div>
   </div>
 
   {#if variant === "detailed"}
-    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {primaryResetMs} {secondaryResetMs} />
+    <InfoGrid {primaryLabel} {secondaryLabel} {pShown} {sShown} {hasSecondary} {primaryResetMs} {secondaryResetMs} />
   {:else}
     <div class="side">
       <span class="sp">{pShown}%</span>
-      <span class="ss">{sShown}%</span>
+      {#if hasSecondary}
+        <span class="ss">{sShown}%</span>
+      {/if}
     </div>
   {/if}
 </div>

@@ -23,8 +23,10 @@ pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
     match (loc, key) {
         ("ko", "five_hour") => "이번 세션".to_string(),
         ("ko", "seven_day") => "주간 세션".to_string(),
+        ("ko", "codex-weekly") => "Codex 주간".to_string(),
         ("en", "five_hour") => "Current session".to_string(),
         ("en", "seven_day") => "Weekly session".to_string(),
+        ("en", "codex-weekly") => "Codex weekly".to_string(),
         _ => fallback.to_string(),
     }
 }

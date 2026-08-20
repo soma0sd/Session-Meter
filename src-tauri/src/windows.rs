@@ -1,7 +1,6 @@
 //! Window helpers: show/hide the local windows, place the frameless widget, and
 //! position the custom themed context-menu window near the tray click.
 
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
@@ -13,10 +12,13 @@ use crate::state::AppState;
 /// Safety net: if the login page has not left `about:blank` within 2s (webview stuck /
 /// blank / unresponsive), cancel the capture watcher and close the window so the user is
 /// never left staring at a blank login window that cannot be dismissed.
-fn spawn_login_blank_guard(app: &AppHandle) {
+fn spawn_login_blank_guard(app: &AppHandle, generation: u64) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
+        if !crate::auth::capture_is_current(&app, generation) {
+            return;
+        }
         let Some(win) = app.get_webview_window("login") else {
             return;
         };
@@ -26,9 +28,7 @@ fn spawn_login_blank_guard(app: &AppHandle) {
             .unwrap_or(true);
         if blank {
             eprintln!("[cg] login page blank after 2s; auto-closing");
-            if let Some(st) = app.try_state::<AppState>() {
-                st.login_watching.store(false, Ordering::SeqCst);
-            }
+            crate::auth::cancel_capture_watch(&app);
             let _ = win.hide();
         }
     });
@@ -46,10 +46,18 @@ pub fn open_settings(app: &AppHandle) {
     show_and_focus(app, "settings");
 }
 
-/// Create (or focus) the claude.ai login window. Must run on the main thread.
+/// Create (or focus) a browser-login window. Must run on the main thread.
 /// Spawns the Rust-driven capture watcher once the window exists.
-pub fn create_login_window(app: &AppHandle) {
-    let url: tauri::Url = match "https://claude.ai/login".parse() {
+pub fn create_login_window(app: &AppHandle, service: &str) {
+    let (login_url, title) = match service {
+        crate::service::CLAUDE => ("https://claude.ai/login", "Sign in to Claude"),
+        crate::service::CODEX => ("https://chatgpt.com/auth/login", "Sign in to Codex"),
+        other => {
+            eprintln!("[cg] unsupported browser login service: {other}");
+            return;
+        }
+    };
+    let url: tauri::Url = match login_url.parse() {
         Ok(u) => u,
         Err(e) => {
             eprintln!("[cg] login url parse error: {e}");
@@ -59,15 +67,18 @@ pub fn create_login_window(app: &AppHandle) {
     // Reuse an existing (possibly hidden-on-close) login window: re-navigate so it
     // shows the live login page, then show + re-arm the capture watcher.
     if let Some(win) = app.get_webview_window("login") {
+        crate::auth::cancel_capture_watch(app);
         let _ = win.navigate(url);
+        let _ = win.set_title(title);
         let _ = win.show();
         let _ = win.set_focus();
-        crate::auth::spawn_capture_watch(app.clone()); // self-guards against duplicates
-        spawn_login_blank_guard(app);
+        if let Some(generation) = crate::auth::spawn_capture_watch(app.clone(), service.to_string()) {
+            spawn_login_blank_guard(app, generation);
+        }
         return;
     }
     match tauri::WebviewWindowBuilder::new(app, "login", tauri::WebviewUrl::External(url.clone()))
-        .title("Sign in to Claude")
+        .title(title)
         .inner_size(480.0, 760.0)
         .center()
         .build()
@@ -75,10 +86,11 @@ pub fn create_login_window(app: &AppHandle) {
         Ok(win) => {
             eprintln!("[cg] login window created");
             // Packaged builds can leave an External window at about:blank; force the
-            // navigation explicitly so claude.ai actually loads (otherwise it is blank).
+            // navigation explicitly so the external login page actually loads (otherwise blank).
             let _ = win.navigate(url);
-            crate::auth::spawn_capture_watch(app.clone());
-            spawn_login_blank_guard(app);
+            if let Some(generation) = crate::auth::spawn_capture_watch(app.clone(), service.to_string()) {
+                spawn_login_blank_guard(app, generation);
+            }
         }
         Err(e) => eprintln!("[cg] login window build error: {e}"),
     }
@@ -362,6 +374,23 @@ pub fn apply_widget_visible(app: &AppHandle, service: &str, visible: bool) {
     crate::dock::apply_layout(app);
 }
 
+/// Hide a dynamically-created service widget after its session is removed or expires. The
+/// persisted visibility preference remains unchanged so the widget returns automatically after
+/// the next successful login.
+pub fn hide_runtime_widget(app: &AppHandle, service: &str) {
+    if service == crate::service::CLAUDE {
+        return;
+    }
+    if let Some(state) = app.try_state::<AppState>() {
+        state.widget_menus_open.lock().unwrap().remove(service);
+    }
+    if let Some(win) = app.get_webview_window(&widget_label(service)) {
+        save_widget_pos(app, service);
+        let _ = win.hide();
+    }
+    crate::dock::apply_layout(app);
+}
+
 /// Show each service's widget on startup, unless the user had it hidden.
 pub fn show_widget(app: &AppHandle) {
     for svc in widget_services(app) {
@@ -423,7 +452,13 @@ pub fn toggle_widget(app: &AppHandle) {
 /// Keep each service widget's actual state in sync with its desired visibility, recovering if
 /// it drifted (hidden when it should show, or pushed off-screen). Called each poll cycle.
 pub fn reconcile_widget_visibility(app: &AppHandle) {
-    for svc in widget_services(app) {
+    let active_services = widget_services(app);
+    for &svc in crate::service::all() {
+        if svc != crate::service::CLAUDE && !active_services.iter().any(|id| id == svc) {
+            hide_runtime_widget(app, svc);
+        }
+    }
+    for svc in active_services {
         if svc != "claude" {
             create_widget_window(app, &svc);
         }

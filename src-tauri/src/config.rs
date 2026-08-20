@@ -36,11 +36,23 @@ fn session_file(service: &str) -> String {
     }
 }
 
+/// A durable sign-out marker written when a provider rejects a stored browser session.  It
+/// remains even if Windows temporarily prevents deleting the encrypted cookie file, so the
+/// next app launch cannot mistake that stale file for a logged-in account.  A successful new
+/// browser login removes the marker only after its replacement cookie has been written.
+fn invalid_session_file(service: &str) -> String {
+    if service == "claude" {
+        "session.invalid".to_string()
+    } else {
+        format!("session.{service}.invalid")
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct NotifySettings {
     pub enabled: bool,
-    /// Alert when the 5-hour session's used% reaches this.
+    /// Alert when a non-weekly primary window's used% reaches this.
     pub session_threshold: u8,
     /// Alert when the weekly window's used% reaches this.
     pub weekly_threshold: u8,
@@ -307,9 +319,13 @@ pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), AppError> {
 
 pub fn load_widget_pos(app: &AppHandle, service: &str) -> Option<(i32, i32)> {
     let v: serde_json::Value = read_json_file(&data_dir(app)?.join(WINDOW_FILE))?;
+    widget_pos_from_value(&v, service)
+}
+
+fn widget_pos_from_value(v: &serde_json::Value, service: &str) -> Option<(i32, i32)> {
     // New shape: { "claude": {x,y}, ... }. Legacy shape (pre-0.4): a bare { x, y } == Claude.
     let legacy = if service == "claude" && v.get("x").is_some() {
-        Some(&v)
+        Some(v)
     } else {
         None
     };
@@ -430,6 +446,27 @@ fn session_path(app: &AppHandle, service: &str) -> Option<PathBuf> {
         .map(|d| d.join(session_file(service)))
 }
 
+fn invalid_session_path(app: &AppHandle, service: &str) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join(invalid_session_file(service)))
+}
+
+fn remove_file_if_exists(path: &Path) -> Result<(), AppError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(AppError::Other(error.to_string())),
+    }
+}
+
+fn clear_invalid_session_marker(app: &AppHandle, service: &str) -> Result<(), AppError> {
+    let path = invalid_session_path(app, service)
+        .ok_or_else(|| AppError::Other("no app data dir".to_string()))?;
+    remove_file_if_exists(&path)
+}
+
 pub fn save_cookie(app: &AppHandle, service: &str, cookie: &str) -> Result<(), AppError> {
     let path =
         session_path(app, service).ok_or_else(|| AppError::Other("no app data dir".to_string()))?;
@@ -437,10 +474,16 @@ pub fn save_cookie(app: &AppHandle, service: &str, cookie: &str) -> Result<(), A
         let _ = std::fs::create_dir_all(parent);
     }
     let bytes = encrypt_secret(cookie.as_bytes())?;
-    std::fs::write(&path, bytes).map_err(|e| AppError::Other(e.to_string()))
+    std::fs::write(&path, bytes).map_err(|e| AppError::Other(e.to_string()))?;
+    // Do this last: an interruption while storing the new cookie remains fail-closed because
+    // `load_cookie` keeps honoring the invalid-session marker until the replacement is complete.
+    clear_invalid_session_marker(app, service)
 }
 
 pub fn load_cookie(app: &AppHandle, service: &str) -> Option<String> {
+    if invalid_session_path(app, service).is_some_and(|path| path.exists()) {
+        return None;
+    }
     let raw = std::fs::read(session_path(app, service)?).ok()?;
     if raw.is_empty() {
         return None;
@@ -452,10 +495,35 @@ pub fn load_cookie(app: &AppHandle, service: &str) -> Option<String> {
 }
 
 pub fn clear_cookie(app: &AppHandle, service: &str) -> Result<(), AppError> {
-    if let Some(path) = session_path(app, service) {
-        let _ = std::fs::remove_file(path);
+    let path =
+        session_path(app, service).ok_or_else(|| AppError::Other("no app data dir".to_string()))?;
+    remove_file_if_exists(&path)
+}
+
+fn write_invalid_session_marker(app: &AppHandle, service: &str) -> Result<(), AppError> {
+    let marker = invalid_session_path(app, service)
+        .ok_or_else(|| AppError::Other("no app data dir".to_string()))?;
+    if let Some(parent) = marker.parent() {
+        fs::create_dir_all(parent).map_err(|e| AppError::Other(e.to_string()))?;
     }
-    Ok(())
+    fs::write(marker, b"").map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Mark a rejected browser session unusable before attempting to delete it.  This protects the
+/// next launch from an expired cookie even if a virus scanner or another process holds the
+/// credential file open during the deletion attempt.
+pub fn invalidate_cookie(app: &AppHandle, service: &str) -> Result<(), AppError> {
+    let marker_result = write_invalid_session_marker(app, service);
+    let clear_result = clear_cookie(app, service);
+    match (marker_result, clear_result) {
+        (Ok(()), Ok(())) | (Err(_), Ok(())) => Ok(()),
+        // The marker is durable even though deleting the obsolete encrypted blob failed.
+        // Return the cleanup error for diagnostics while `load_cookie` remains fail-closed.
+        (Ok(()), Err(error)) => Err(error),
+        (Err(marker_error), Err(clear_error)) => Err(AppError::Other(format!(
+            "could not invalidate session ({marker_error}); could not remove credential ({clear_error})"
+        ))),
+    }
 }
 
 /// Encrypt the session secret for at-rest storage. Windows: DPAPI (per-user scope);
@@ -571,6 +639,51 @@ mod settings_tests {
         assert!(!s.dock.enabled, "dock defaults to disabled");
         assert_eq!(s.dock.columns, 2, "dock defaults to 2 columns");
         assert!(s.dock.order.is_empty(), "dock defaults to an empty order");
+    }
+
+    #[test]
+    fn session_files_stay_service_scoped() {
+        assert_eq!(session_file(crate::service::CLAUDE), "session.dat");
+        assert_eq!(session_file(crate::service::CODEX), "session.codex.dat");
+        assert_eq!(session_file(crate::service::GEMINI), "session.gemini.dat");
+        assert_eq!(invalid_session_file(crate::service::CLAUDE), "session.invalid");
+        assert_eq!(invalid_session_file(crate::service::CODEX), "session.codex.invalid");
+        assert_eq!(invalid_session_file(crate::service::GEMINI), "session.gemini.invalid");
+    }
+
+    #[test]
+    fn session_cleanup_ignores_missing_file_but_reports_real_failure() {
+        let root = std::env::temp_dir().join(format!(
+            "sessionmeter-config-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after unix epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("test directory");
+        assert!(remove_file_if_exists(&root.join("missing.dat")).is_ok());
+        assert!(remove_file_if_exists(&root).is_err());
+        fs::remove_dir_all(root).expect("test cleanup");
+    }
+
+    #[test]
+    fn codex_widget_and_position_keys_are_independent() {
+        let mut settings = Settings::default();
+        let mut codex_widget = settings.widget(crate::service::CODEX);
+        codex_widget.style = "hex-rings-detailed".to_string();
+        settings
+            .widgets
+            .insert(crate::service::CODEX.to_string(), codex_widget);
+        assert_eq!(settings.widget(crate::service::CODEX).style, "hex-rings-detailed");
+        assert_eq!(settings.widget(crate::service::CLAUDE).style, "focus-slim-detailed");
+
+        let positions = serde_json::json!({
+            "claude": { "x": 10, "y": 20 },
+            "codex": { "x": 30, "y": 40 }
+        });
+        assert_eq!(widget_pos_from_value(&positions, crate::service::CLAUDE), Some((10, 20)));
+        assert_eq!(widget_pos_from_value(&positions, crate::service::CODEX), Some((30, 40)));
     }
 
     #[test]

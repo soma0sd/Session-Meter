@@ -52,9 +52,11 @@
     (primaryKeyOverride ? snapshot.buckets.find((b) => b.key === primaryKeyOverride) : undefined) ??
       snapshot.five_hour,
   );
+  const secondaryKey = $derived(secondaryKeyOverride ?? snapshot.secondary_key);
   const secondary = $derived(
-    (secondaryKeyOverride ? snapshot.buckets.find((b) => b.key === secondaryKeyOverride) : undefined) ??
-      snapshot.weekly_primary,
+    secondaryKey
+      ? snapshot.buckets.find((bucket) => bucket.key === secondaryKey) ?? snapshot.weekly_primary
+      : null,
   );
   const primaryPct = $derived(primary ? primary.utilization : 0);
   const secondaryPct = $derived(secondary ? secondary.utilization : 0);
@@ -65,9 +67,8 @@
     secondary ? Math.max(0, Date.parse(secondary.resets_at) - now) : 0,
   );
   const primaryLabel = $derived(windowLabel(primaryKeyOverride ?? snapshot.primary_key, "five_hour"));
-  const secondaryLabel = $derived(
-    windowLabel(secondaryKeyOverride ?? snapshot.secondary_key, "seven_day"),
-  );
+  const secondaryLabel = $derived(windowLabel(secondaryKey, "seven_day"));
+  const hasSecondary = $derived(secondary !== null);
 </script>
 
 <Comp
@@ -75,6 +76,7 @@
   {displayMode}
   {primaryPct}
   {secondaryPct}
+  {hasSecondary}
   {primaryResetMs}
   {secondaryResetMs}
   {primaryLabel}

@@ -146,7 +146,13 @@
   const weekVals = $derived(seriesValues("weekly"));
   const fiveTimes = $derived(seriesTimes("five_hour"));
   const weekTimes = $derived(seriesTimes("weekly"));
-  const hasHistory = $derived(fiveVals.length >= 2 || weekVals.length >= 2);
+  const secondary = $derived.by(() => {
+    const key = snap?.secondary_key;
+    if (!snap || !key) return null;
+    return snap.buckets.find((bucket) => bucket.key === key) ?? snap.weekly_primary;
+  });
+  const hasSecondary = $derived(secondary !== null);
+  const hasHistory = $derived(fiveVals.length >= 2 || (hasSecondary && weekVals.length >= 2));
 
   // Chart time window: points are placed by real timestamp within [winStart, now], so each
   // range renders at its true scale (24h vs 7d vs 30d look different even with the same data).
@@ -162,7 +168,9 @@
     return forecast(seriesTimes(key), seriesValues(key), bucket.remaining, resetMs);
   }
   const fiveFc = $derived(fc("five_hour", snap?.five_hour ?? null));
-  const weekFc = $derived(fc("weekly", snap?.weekly_primary ?? null));
+  const weekFc = $derived(
+    hasSecondary ? fc("weekly", secondary) : { depleting: false, minutesToEmpty: null, beforeReset: false },
+  );
 
   function fcText(f: Forecast): string {
     if (!f.depleting || f.minutesToEmpty == null) return $t("stats.forecast.stable");
@@ -182,6 +190,18 @@
   function bucketLabel(b: Bucket): string {
     const l = $t("bucket." + b.key);
     return l.startsWith("bucket.") ? b.label : l;
+  }
+
+  function windowLabel(key: string | null | undefined, fallbackKey: string): string {
+    const resolved = key ?? fallbackKey;
+    const bucket = snap?.buckets.find((b) => b.key === resolved);
+    if (bucket) return bucketLabel(bucket);
+    const localized = $t("bucket." + resolved);
+    return localized.startsWith("bucket.") ? resolved : localized;
+  }
+
+  function activeServiceName(): string {
+    return services.find((service) => service.id === activeService)?.name ?? activeService;
   }
 
   // Time axis across the top of the history chart. 24h shows clock time; wider ranges show
@@ -220,7 +240,7 @@
 
   {#if snap && (snap.organization_name || snap.account_email || snap.subscription)}
     <div class="org">
-      <span class="org-name">{snap.organization_name || "Claude"}</span>
+      <span class="org-name">{snap.organization_name || activeServiceName()}</span>
       {#if snap.subscription}
         <span class="org-sub">{snap.subscription}</span>
       {/if}
@@ -238,7 +258,9 @@
         ? $t("common.sessionExpired")
         : snap.status === "not_running"
           ? $t("common.antigravityNotRunning")
-          : $t("common.notLoggedIn")}
+          : snap.status === "error"
+            ? $t("common.usageUnavailable")
+            : $t("common.notLoggedIn")}
     </div>
   {:else}
     <section class="cards">
@@ -283,7 +305,7 @@
           {#each [25, 50, 75] as g (g)}
             <line x1="0" x2={CW} y1={mapY(g, CH, 3)} y2={mapY(g, CH, 3)} class="grid" />
           {/each}
-          {#if weekVals.length >= 2}
+          {#if hasSecondary && weekVals.length >= 2}
             <path d={areaPathT(weekTimes, weekVals, winStart, winEnd, CW, CH)} class="area week" />
             <path d={linePathT(weekTimes, weekVals, winStart, winEnd, CW, CH)} class="line week" />
           {/if}
@@ -293,8 +315,10 @@
           {/if}
         </svg>
         <div class="legend">
-          <span class="key"><i class="sw five"></i>{$t("bucket.five_hour")}</span>
-          <span class="key"><i class="sw week"></i>{$t("bucket.seven_day")}</span>
+          <span class="key"><i class="sw five"></i>{windowLabel(snap.primary_key, "five_hour")}</span>
+          {#if hasSecondary}
+            <span class="key"><i class="sw week"></i>{windowLabel(snap.secondary_key, "seven_day")}</span>
+          {/if}
         </div>
       {:else}
         <div class="nohist">{$t("stats.noHistory")}</div>
@@ -304,8 +328,10 @@
     <section class="grid2">
       <div class="panel">
         <h2>{$t("stats.forecast")}</h2>
-        <div class="fc"><span class="fc-label">{$t("bucket.five_hour")}</span><span>{fcText(fiveFc)}</span></div>
-        <div class="fc"><span class="fc-label">{$t("bucket.seven_day")}</span><span>{fcText(weekFc)}</span></div>
+        <div class="fc"><span class="fc-label">{windowLabel(snap.primary_key, "five_hour")}</span><span>{fcText(fiveFc)}</span></div>
+        {#if hasSecondary}
+          <div class="fc"><span class="fc-label">{windowLabel(snap.secondary_key, "seven_day")}</span><span>{fcText(weekFc)}</span></div>
+        {/if}
       </div>
       <div class="panel">
         <h2>{$t("stats.resetSchedule")}</h2>

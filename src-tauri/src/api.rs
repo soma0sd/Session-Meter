@@ -38,6 +38,8 @@ pub struct Bucket {
 pub struct UsageSnapshot {
     /// Which service this snapshot describes ("claude" | "gemini").
     pub service_id: String,
+    /// Legacy serialization field for a provider's first headline window. It is not always
+    /// a 5-hour session: Codex, for example, uses it for its weekly quota.
     pub five_hour: Option<WindowUsage>,
     pub weekly_primary: Option<WindowUsage>,
     /// Bucket keys of the two headline windows the widget renders as primary/secondary.

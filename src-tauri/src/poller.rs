@@ -44,16 +44,18 @@ async fn poll_once(app: &AppHandle) {
             }
             Err(AppError::Unauthorized) => {
                 eprintln!("[cg] poll: unauthorized ({svc}, session expired)");
-                if let Some(state) = app.try_state::<AppState>() {
-                    if let Some(s) = state.last_snapshot.lock().unwrap().get_mut(&svc) {
-                        s.status = "unauthorized".to_string();
-                    }
+                if let Err(error) = crate::config::invalidate_cookie(app, &svc) {
+                    // `invalidate_cookie` writes a fail-closed marker before deleting the
+                    // credential whenever possible, so this error cannot resurrect an expired
+                    // Codex session after restart.  The unauthorised snapshot below remains the
+                    // visible state even if both filesystem operations failed.
+                    eprintln!("[cg] could not fully invalidate expired {svc} session: {error}");
                 }
+                usage::mark_status(app, &svc, "unauthorized");
                 let _ = app.emit(
                     "session://changed",
                     serde_json::json!({ "service": svc, "logged_in": false, "org_name": "" }),
                 );
-                tray::update_tray(app);
             }
             Err(AppError::NotRunning) => {
                 // Antigravity IDE just isn't running right now - not a sign-out (the
@@ -77,6 +79,7 @@ async fn poll_once(app: &AppHandle) {
             }
             Err(e) => {
                 eprintln!("[cg] poll error ({svc}): {e}");
+                usage::mark_status(app, &svc, "error");
             }
         }
     }

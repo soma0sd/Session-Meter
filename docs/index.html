@@ -6,7 +6,7 @@
     <title>SessionMeter - 사용 설명서</title>
     <meta
       name="description"
-      content="SessionMeter 사용 설명서 - Claude·Gemini·Antigravity IDE 사용량을 관리하는 데스크톱 앱"
+      content="SessionMeter 사용 설명서 - Claude·Codex(ChatGPT)·Gemini·Antigravity IDE 사용량을 관리하는 데스크톱 앱"
     />
     <link rel="icon" type="image/png" href="favicon.png" />
     <style>
@@ -188,7 +188,7 @@
   <body>
     <header>
       <h1>SessionMeter</h1>
-      <p>Claude · Gemini · Antigravity IDE 사용량 관리 데스크톱 앱 · 사용 설명서</p>
+      <p>Claude · Codex(ChatGPT) · Gemini · Antigravity IDE 사용량 관리 데스크톱 앱 · 사용 설명서</p>
     </header>
 
     <div class="layout">
@@ -213,23 +213,25 @@
         <section id="intro">
           <h2>소개</h2>
           <p>
-            SessionMeter는 <b>Claude</b>, <b>Gemini</b>, <b>Antigravity IDE</b>의 사용량을 시스템
-            트레이 아이콘, 데스크톱 위젯, 통계 창으로 보여 주는 데스크톱 애플리케이션입니다. 로그인한
-            (또는 연동된) 서비스마다 5시간·주간 등의 남은 사용량과 초기화까지 남은 시간을 한눈에 확인할
-            수 있습니다. Tauri v2로 제작된 오픈소스(MIT) 프로그램입니다.
+            SessionMeter는 <b>Claude</b>, <b>Codex(ChatGPT 구독)</b>, <b>Gemini</b>, <b>Antigravity IDE</b>의
+            사용량을 시스템 트레이 아이콘, 데스크톱 위젯, 통계 창으로 보여 주는 데스크톱 애플리케이션입니다.
+            로그인한 (또는 연동된) 서비스마다 제공되는 5시간·주간 등의 남은 사용량과 초기화까지 남은 시간을 한눈에
+            확인할 수 있습니다. Tauri v2로 제작된 오픈소스(MIT) 프로그램입니다.
           </p>
           <div class="warn">
-            <b>비공식 도구이며 이용약관에 유의해야 합니다.</b> Claude·Gemini는 로그인된 본인 세션을
+            <b>비공식 도구이며 이용약관에 유의해야 합니다.</b> Claude·Codex·Gemini는 로그인된 본인 세션을
             이용해 각 서비스의 사용량 페이지와 동일한 데이터를 가져오는 방식입니다. 공식/공개 API가
             아니며 해당 서비스의 API 키를 사용하지 않습니다. 각 서비스의 약관은 봇·스크립트 등 자동
             수단의 접근을 제한하므로 이 방식은 약관에 어긋날 수 있고 계정 제재 위험이 있습니다. 반드시
             <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic 약관</a>과
+            <a href="https://openai.com/policies/terms-of-use/">OpenAI 이용약관</a>,
             <a href="https://policies.google.com/terms">Google 약관</a>을 확인하고 본인 책임으로
             사용하십시오. Antigravity IDE는 원격 웹 페이지가 아니라 <b>본인 PC에서 실행 중인 IDE가
-            제공하는 로컬(loopback) API</b>를 사용하므로 위 두 서비스와 위험 성격이 다르지만, 문서화되지
+            제공하는 로컬(loopback) API</b>를 사용하므로 원격 웹 서비스와 위험 성격이 다르지만, 문서화되지
             않은 인터페이스이므로 IDE 업데이트에 따라 동작이 바뀌거나 중단될 수 있습니다. 본 프로그램은
-            Anthropic·Google·Antigravity IDE 개발사와 무관하며, "Claude"는 Anthropic, PBC의, "Gemini"는
-            Google LLC의, "Antigravity"는 해당 개발사의 상표입니다.
+            Anthropic·OpenAI·Google·Antigravity IDE 개발사와 무관하며, "Claude"는 Anthropic, PBC의,
+            "Codex"와 "ChatGPT"는 OpenAI의, "Gemini"는 Google LLC의, "Antigravity"는 해당 개발사의
+            상표입니다.
           </div>
         </section>
 
@@ -256,6 +258,17 @@
             세션은 OS 애플리케이션 데이터 폴더의 사용자별 파일에 저장되고, Windows에서는 DPAPI(사용자
             범위)로 암호화되어 다른 사용자·오프라인 디스크·복사된 백업에서 복호화할 수 없습니다.
           </p>
+          <h3>Codex</h3>
+          <p>
+            설정에서 <b>Codex 로그인</b>을 선택하면 앱 안에서 ChatGPT 로그인 창이 열립니다. 로그인 후
+            `chatgpt.com` 세션을 검증해 저장하고, Codex 구독의 주간 한도를 위젯·통계에 표시합니다.
+            `primary_window`와 `secondary_window` 중 `limit_window_seconds`가 `604800`인 창만 사용하며,
+            5시간 세션, OpenAI API 토큰 사용량·비용과 추가 모델별 한도는 표시하지 않습니다.
+          </p>
+          <div class="note">
+            Codex 사용량 조회는 비공개 `chatgpt.com` 엔드포인트에 의존합니다. 로그인 쿠키 또는 응답 구조가
+            바뀌면 세션이 만료되거나 조회가 실패할 수 있으며, 이 경우 설정에서 다시 로그인합니다.
+          </div>
           <h3>Gemini</h3>
           <p>
             Gemini 로그인은 <b>별도의 프로세스로 격리된 창</b>에서 진행됩니다. 이렇게 하면 Google
@@ -284,6 +297,10 @@
                     <span class="aw-chip aw-chip-plan" style="margin-top:4px;display:inline-block;">Claude Pro</span>
                   </div>
                   <button class="aw-btn" type="button">로그아웃</button>
+                </div>
+                <div class="aw-row">
+                  <div class="aw-name">Codex</div>
+                  <button class="aw-btn" type="button">로그인</button>
                 </div>
                 <div class="aw-row">
                   <div class="aw-name">Gemini</div>
@@ -358,6 +375,14 @@
             초기화까지 남은 시간을 보여 줍니다. 표시 내용에 맞춰 창 크기가 자동으로 맞춰지며, 로그인한
             <b>서비스마다 독립된 위젯 창</b>이 뜨고 제목표시줄에 서비스 이름이 표시됩니다.
           </p>
+          <p>
+            컴팩트 위젯의 상단 더보기 메뉴는 위젯 패널 위에 팝오버로 열립니다. 메뉴를 열거나 닫아도
+            사용량 본문과 도킹된 이웃 위젯의 위치는 바뀌지 않습니다.
+          </p>
+          <p>
+            아래 두 지표 예시는 Claude 위젯 기준입니다. Codex 위젯은 `limit_window_seconds`가 `604800`인
+            주간 지표 하나만 표시하며 5시간 세션을 표시하지 않습니다.
+          </p>
           <div class="render-inline"><div style="display:inline-flex;flex-direction:row;width:205.938px;height:202.922px;padding-top:12px;padding-right:14px;padding-bottom:12px;padding-left:14px;border-radius:12px;background-color:rgb(255, 255, 255);color:rgb(24, 24, 27);font-family:&quot;Noto Sans&quot;, &quot;Noto Sans KR&quot;, system-ui, -apple-system, sans-serif;font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(0, 0, 0, 0.13) 0px 6px 20px 0px;"><div style="display:flex;flex-direction:column;gap:9px;width:177.938px;height:178.922px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:3px;width:177.938px;height:31.5px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:177.938px;height:19.5px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:47.5312px;height:18px;color:rgb(24, 24, 27);font-size:12px;font-weight:400;line-height:18px;text-align:start;">이번 세션</span> <span style="display:block;flex-direction:row;width:27.8594px;height:19.5px;color:rgb(217, 119, 87);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:19.5px;text-align:start;">62%</span></div> <div style="display:block;flex-direction:row;width:177.938px;height:9px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:110.312px;height:9px;border-radius:5px;background-image:linear-gradient(90deg, rgba(217, 119, 87, 0.85), rgb(217, 119, 87));color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;box-shadow:rgba(217, 119, 87, 0.4) 0px 0px 8px 0px;"></div></div></div> <div style="display:flex;flex-direction:column;gap:3px;width:177.938px;height:26.6875px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:177.938px;height:19.6875px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:44.3594px;height:16.7969px;color:rgb(90, 90, 100);font-size:11.2px;font-weight:400;line-height:16.8px;text-align:start;">주간 세션</span> <span style="display:block;flex-direction:row;width:28.125px;height:19.6875px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:19.68px;text-align:start;">39%</span></div> <div style="display:block;flex-direction:row;width:177.938px;height:4px;border-radius:5px;background-color:rgb(226, 228, 234);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;overflow:hidden;"><div style="display:block;flex-direction:row;width:69.3906px;height:4px;border-radius:5px;background-color:rgb(224, 164, 88);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"></div></div></div> <div style="display:grid;flex-direction:row;gap:8px;grid-template-columns:73.9688px 73.9688px;width:177.938px;height:102.734px;flex:1 1 0%;padding-top:8px;padding-right:10px;padding-bottom:8px;padding-left:10px;border-right:1px solid rgb(220, 222, 228);border-bottom:1px solid rgb(220, 222, 228);border-radius:10px;background-color:rgba(226, 228, 234, 0.4);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;padding-right:8px;border-right:1px solid rgb(220, 222, 228);color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:64.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">이번 세션</div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(217, 119, 87);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">62%</span></div> <div style="display:flex;flex-direction:column;width:64.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:64.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:64.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">2시간 14분</span></div></div> <div style="display:flex;flex-direction:column;gap:4px;width:73.9688px;height:84.7344px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><div style="display:block;flex-direction:row;width:73.9688px;height:17.3906px;padding-bottom:2px;border-bottom:1px dashed rgb(220, 222, 228);color:rgb(90, 90, 100);font-size:9.6px;font-weight:700;line-height:14.4px;letter-spacing:0.384px;text-transform:uppercase;text-align:start;">주간 세션</div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">사용량</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(224, 164, 88);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">39%</span></div> <div style="display:flex;flex-direction:column;width:73.9688px;height:29.6719px;color:rgb(24, 24, 27);font-size:13px;font-weight:400;line-height:19.5px;text-align:start;"><span style="display:block;flex-direction:row;width:73.9688px;height:13.9219px;color:rgb(90, 90, 100);font-size:9.28px;font-weight:400;line-height:13.92px;text-align:start;">초기화 남은 시간</span> <span style="display:block;flex-direction:row;width:73.9688px;height:15.75px;color:rgb(24, 24, 27);font-size:13.12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:15.744px;text-align:start;">3일 6시간</span></div></div></div></div></div></div>
           <ul>
             <li><b>통계·설정·스타일 바로가기</b>: 상단 아이콘으로 통계 창, 설정 창, 위젯 스타일 창을
@@ -377,8 +402,9 @@
             선택합니다. 실시간 미리보기와 표시 토글(남은 사용량 / 사용한 사용량)을 제공합니다.
           </p>
           <p>
-            위젯의 두 지표 색상은 서비스에 맞춰 표시됩니다(예:
+            위젯 지표 색상은 서비스에 맞춰 표시됩니다(예:
             <span class="swatch" style="background:rgb(217,119,87)"></span>Claude 코럴,
+            <span class="swatch" style="background:rgb(16,185,129)"></span>Codex 그린,
             <span class="swatch" style="background:rgb(66,133,244)"></span>Gemini 블루). 아래
             갤러리는 앱의 실제 위젯 컴포넌트를 그대로 렌더한 것으로(스크린샷 아님, Claude 색상 · 남은
             사용량 표시 기준 · 예시 값), 확대해도 선명합니다.
@@ -445,6 +471,7 @@
             <div class="app-window">
               <div class="titlebar" style="display:flex;gap:14px;">
                 <span style="color:#e8e9ee;border-bottom:2px solid rgb(217,119,87);padding-bottom:8px;">Claude</span>
+                <span style="color:#767a8a;">Codex</span>
                 <span style="color:#767a8a;">Gemini</span>
                 <span style="color:#767a8a;">Antigravity</span>
               </div>
@@ -499,8 +526,10 @@
             <li><b>갱신 주기</b>: 1 / 5 / 10 / 15 / 30분.</li>
             <li><b>시작 시 실행</b>: 로그인 시 자동 실행 등록.</li>
             <li><b>알림</b>: 사용량 기준·초기화 알림.</li>
-            <li><b>계정</b>: Claude·Gemini는 로그인 상태(이름·이메일)와 로그인/로그아웃 버튼, Antigravity는
-              로그인 개념이 없어 IDE 실행 여부에 따라 <b>실행 중</b> 상태만 표시됩니다.</li>
+            <li><b>계정</b>: Claude·Codex·Gemini는 로그인 상태와 로그인/로그아웃 버튼을 제공합니다.
+              Claude·Gemini는 가능한 경우 이름·이메일을, Codex는 응답이 제공하는 ChatGPT 플랜 식별자를
+              함께 표시합니다. Antigravity는 로그인 개념이 없어 IDE 실행 여부에 따라 <b>실행 중</b> 상태만
+              표시됩니다.</li>
           </ul>
           <p>
             위젯 관련 설정(스타일, 표시 기준, 투명도, 항상 위, 이동 잠금, 그리드 도킹)은 <b>위젯 스타일</b>
@@ -522,7 +551,7 @@
                 <div class="aw-row">
                   <div>
                     <div class="aw-name">업데이트</div>
-                    <div class="aw-sub">현재 v0.5.1</div>
+                    <div class="aw-sub">현재 v1.0.0</div>
                   </div>
                   <button class="aw-btn" type="button">업데이트 확인</button>
                 </div>
@@ -541,6 +570,9 @@
             <li><b>Gemini 로그인 화면이 뜨지 않거나 "안전하지 않은 브라우저" 안내가 나옴</b>:
               Google이 임베드 로그인을 제한하는 경우입니다. 창을 닫고 잠시 후 다시 시도합니다. 로그인
               창은 별도 프로세스라 실패해도 앱 본체는 계속 동작합니다.</li>
+            <li><b>Codex 사용량이 표시되지 않음</b>: ChatGPT 세션이 만료되었거나 비공개 사용량 응답이
+              변경된 경우입니다. 설정에서 Codex를 로그아웃한 뒤 다시 로그인합니다. OpenAI API 사용량과
+              비용은 지원 대상이 아닙니다.</li>
             <li><b>Antigravity가 "실행 중"으로 표시되지 않음</b>: Antigravity IDE가 실제로 실행
               중인지 확인합니다. IDE의 로그인 포트·인증 토큰은 재시작마다 바뀌므로 SessionMeter가
               매번 다시 탐색하며, IDE를 새로 켰다면 다음 갱신 주기까지 잠시 기다립니다. 현재 Windows
@@ -555,25 +587,30 @@
         <section id="license">
           <h2>라이선스·면책·상표</h2>
           <p>
-            애플리케이션 코드는 MIT 라이선스입니다. 번들된 폰트(Noto Sans, Noto Sans KR)는 SIL Open
-            Font License 1.1을 따릅니다.
+            애플리케이션 코드는 <a href="https://github.com/soma0sd/Session-Meter/blob/main/LICENSE">MIT
+            라이선스</a>입니다. 번들된 폰트(Noto Sans, Noto Sans KR)는 SIL Open Font License 1.1을
+            따르며, Rust 의존성에는 MPL-2.0 구성 요소가 포함됩니다. 전체 고지는
+            <a href="https://github.com/soma0sd/Session-Meter/blob/main/THIRD_PARTY_LICENSES.md">서드파티
+            라이선스 문서</a>에서 확인할 수 있습니다.
           </p>
           <p>
-            SessionMeter는 claude.ai·gemini.google.com의 비공식 엔드포인트와, 로컬에서 실행 중인
+            SessionMeter는 claude.ai·chatgpt.com·gemini.google.com의 비공식 엔드포인트와, 로컬에서 실행 중인
             Antigravity IDE의 비공개 로컬 API를 사용하므로 언제든 동작이 바뀔 수 있습니다. 본인 계정의
             세션(또는 본인 PC의 IDE)으로만 동작하며,
             <a href="https://www.anthropic.com/legal/consumer-terms">Anthropic 약관</a>과
+            <a href="https://openai.com/policies/terms-of-use/">OpenAI 이용약관</a>,
             <a href="https://policies.google.com/terms">Google 약관</a>을 확인한 뒤 본인 책임으로
-            사용하십시오. 본 프로그램은 Anthropic·Google·Antigravity IDE 개발사와 제휴·후원·보증
-            관계가 없으며, "Claude"·"Anthropic"은 Anthropic, PBC의, "Gemini"는 Google LLC의,
-            "Antigravity"는 해당 개발사의 상표로 호환 대상을 설명하기 위해서만 사용되었습니다.
+            사용하십시오. 본 프로그램은 Anthropic·OpenAI·Google·Antigravity IDE 개발사와 제휴·후원·보증
+            관계가 없으며, "Claude"·"Anthropic"은 Anthropic, PBC의, "Codex"·"ChatGPT"는 OpenAI의,
+            "Gemini"는 Google LLC의, "Antigravity"는 해당 개발사의 상표로 호환 대상을 설명하기 위해서만
+            사용되었습니다.
           </p>
         </section>
       </main>
     </div>
 
     <footer>
-      <p>SessionMeter · MIT License · Anthropic·Google과 무관</p>
+      <p>SessionMeter · MIT License · Anthropic·OpenAI·Google과 무관</p>
     </footer>
   </body>
 </html>

@@ -1,4 +1,4 @@
-//! Session capture from the embedded claude.ai login webview.
+//! Session capture from embedded browser-login webviews.
 //!
 //! The `sessionKey` cookie is httpOnly, so it can't be read from page JS; we read it
 //! from the webview's cookie store instead. `cookies_for_url` is blocking and can
@@ -13,15 +13,25 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Collect all claude.ai cookies from the `login` webview and build a `Cookie:` header
-/// string. Fails if `sessionKey` is not present yet (user has not finished signing in).
-pub async fn capture_cookie(app: &AppHandle) -> Result<String, AppError> {
+fn cookie_origin(service: &str) -> Result<url::Url, AppError> {
+    let origin = match service {
+        crate::service::CLAUDE => "https://claude.ai",
+        crate::service::CODEX => "https://chatgpt.com",
+        other => return Err(AppError::Other(format!("service has no browser session: {other}"))),
+    };
+    origin
+        .parse()
+        .map_err(|e: url::ParseError| AppError::Other(e.to_string()))
+}
+
+/// Collect all cookies for a browser-login service and build a `Cookie:` header string.
+/// Claude's httpOnly `sessionKey` remains an early guard; Codex is validated by a quota
+/// fetch below because ChatGPT can change the name of its authenticated browser cookie.
+pub async fn capture_cookie(app: &AppHandle, service: &str) -> Result<String, AppError> {
     let win = app
         .get_webview_window("login")
         .ok_or_else(|| AppError::Other("login window is not open".to_string()))?;
-    let url: url::Url = "https://claude.ai"
-        .parse()
-        .map_err(|e: url::ParseError| AppError::Other(e.to_string()))?;
+    let url = cookie_origin(service)?;
 
     // Bound the (blocking, UI-thread-bound) cookie read so a hung/blank login webview
     // cannot stall the watcher indefinitely.
@@ -32,18 +42,14 @@ pub async fn capture_cookie(app: &AppHandle) -> Result<String, AppError> {
         .map_err(|e| AppError::Other(e.to_string()))?
         .map_err(|e| AppError::Other(e.to_string()))?;
 
-    // The claude.ai auth cookie is `sessionKey` (httpOnly). Match it exactly so analytics
-    // cookies like `activitySessionId` do not trigger premature API calls. Names are
-    // logged to help diagnose if the cookie is ever renamed.
-    let names: Vec<String> = cookies.iter().map(|c| c.name().to_string()).collect();
-    let has_session = cookies
-        .iter()
-        .any(|c| c.name() == "sessionKey" && !c.value().is_empty());
-    eprintln!(
-        "[cg] login poll: {} cookies {names:?}, sessionKey={has_session}",
-        cookies.len()
-    );
-    if !has_session {
+    let has_candidate = if service == crate::service::CLAUDE {
+        cookies
+            .iter()
+            .any(|c| c.name() == "sessionKey" && !c.value().is_empty())
+    } else {
+        cookies.iter().any(|c| !c.value().is_empty())
+    };
+    if !has_candidate {
         return Err(AppError::NoSession);
     }
 
@@ -55,29 +61,26 @@ pub async fn capture_cookie(app: &AppHandle) -> Result<String, AppError> {
     Ok(header)
 }
 
-/// Watch the open login window for the session cookie (Rust-driven, so it works
+/// Watch the open login window for a valid browser session (Rust-driven, so it works
 /// regardless of which UI opened the window). On success: validate, persist to the
 /// session file, apply the snapshot, notify the frontend, and close the login window.
-pub fn spawn_capture_watch(app: AppHandle) {
-    {
-        let Some(state) = app.try_state::<AppState>() else {
-            return;
-        };
-        if state.login_watching.swap(true, Ordering::SeqCst) {
-            return; // a watcher is already running
-        }
-    }
+pub fn spawn_capture_watch(app: AppHandle, service: String) -> Option<u64> {
+    let generation = {
+        let state = app.try_state::<AppState>()?;
+        let generation = state
+            .login_capture_generation
+            .fetch_add(1, Ordering::SeqCst)
+            + 1;
+        state.login_watching.store(true, Ordering::SeqCst);
+        generation
+    };
     tauri::async_runtime::spawn(async move {
         let started = Instant::now();
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
             // Cancelled: the user closed the login window (which hides + clears this flag).
             // Stop before touching the webview so cookies_for_url can't race its teardown.
-            let active = app
-                .try_state::<AppState>()
-                .map(|s| s.login_watching.load(Ordering::SeqCst))
-                .unwrap_or(false);
-            if !active {
+            if !capture_is_current(&app, generation) {
                 eprintln!("[cg] login capture cancelled");
                 break;
             }
@@ -89,28 +92,42 @@ pub fn spawn_capture_watch(app: AppHandle) {
                 eprintln!("[cg] login capture timed out");
                 break;
             }
-            match capture_cookie(&app).await {
+            match capture_cookie(&app, &service).await {
                 Ok(cookie) => {
                     let Some(client) = app.try_state::<AppState>().map(|s| s.client.clone()) else {
                         break;
                     };
-                    match crate::api::fetch_usage(&client, &cookie).await {
+                    match crate::service::fetch_with_cookie(&service, &client, &cookie).await {
                         Ok(snapshot) => {
-                            let _ =
-                                crate::config::save_cookie(&app, crate::service::CLAUDE, &cookie);
+                            if !capture_is_current(&app, generation) {
+                                break;
+                            }
+                            if let Err(error) = crate::config::save_cookie(&app, &service, &cookie) {
+                                eprintln!("[cg] could not save {service} session: {error}");
+                                // A validated webview cookie is not a signed-in app session
+                                // until its encrypted persistence succeeds.  Surface the failure
+                                // without publishing a success event or creating a widget.
+                                crate::usage::mark_status(&app, &service, "error");
+                                if let Some(w) = app.get_webview_window("login") {
+                                    let _ = w.close();
+                                }
+                                break;
+                            }
                             let org = snapshot.organization_name.clone();
                             let email = snapshot.account_email.clone();
                             eprintln!(
-                                "[cg] captured session: org='{}' buckets={}",
-                                org,
-                                snapshot.buckets.len()
+                                "[cg] captured {service} session: org='{}' buckets={}",
+                                org, snapshot.buckets.len()
                             );
-                            // apply_snapshot persists org_name + account_email to settings.
                             crate::usage::apply_snapshot(&app, snapshot);
                             let _ = app.emit(
                                 "session://changed",
-                                serde_json::json!({ "logged_in": true, "org_name": org, "email": email }),
+                                serde_json::json!({ "service": service, "logged_in": true, "org_name": org, "email": email }),
                             );
+                            let app_for_windows = app.clone();
+                            let _ = app.run_on_main_thread(move || {
+                                crate::windows::reconcile_widget_visibility(&app_for_windows);
+                            });
                             if let Some(w) = app.get_webview_window("login") {
                                 let _ = w.close();
                             }
@@ -124,7 +141,28 @@ pub fn spawn_capture_watch(app: AppHandle) {
             }
         }
         if let Some(st) = app.try_state::<AppState>() {
-            st.login_watching.store(false, Ordering::SeqCst);
+            if st.login_capture_generation.load(Ordering::SeqCst) == generation {
+                st.login_watching.store(false, Ordering::SeqCst);
+            }
         }
     });
+    Some(generation)
+}
+
+/// Invalidate the active browser-login watcher before hiding or reusing the shared webview.
+pub fn cancel_capture_watch(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.login_watching.store(false, Ordering::SeqCst);
+        state.login_capture_generation.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Whether a watcher or blank-page guard still belongs to the current shared login webview.
+pub fn capture_is_current(app: &AppHandle, generation: u64) -> bool {
+    app.try_state::<AppState>()
+        .map(|state| {
+            state.login_watching.load(Ordering::SeqCst)
+                && state.login_capture_generation.load(Ordering::SeqCst) == generation
+        })
+        .unwrap_or(false)
 }

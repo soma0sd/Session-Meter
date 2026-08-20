@@ -21,6 +21,7 @@ export type UsageStatus = "ok" | "unauthorized" | "not_running" | "error";
 
 export interface UsageSnapshot {
   service_id: string;
+  /** Legacy field name for the provider's primary headline window. Not always a 5-hour window. */
   five_hour: WindowUsage | null;
   weekly_primary: WindowUsage | null;
   primary_key: string | null;
@@ -169,6 +170,22 @@ function mockUsage(service?: string): UsageSnapshot {
       status: "ok",
     };
   }
+  if (service === "codex") {
+    const buckets = [b("codex-weekly", "Codex weekly", 43, 4 * 86_400_000)];
+    return {
+      service_id: "codex",
+      five_hour: { remaining: 43, utilization: 57, resets_at: buckets[0].resets_at },
+      weekly_primary: null,
+      primary_key: "codex-weekly",
+      secondary_key: null,
+      buckets,
+      organization_name: "Codex",
+      account_email: "",
+      subscription: "ChatGPT Plus",
+      fetched_at: iso(0),
+      status: "ok",
+    };
+  }
   if (service === "antigravity_ide") {
     const buckets = [
       b("gemini-5h", "Gemini 5-hour", 85, 3 * 3600_000),
@@ -270,6 +287,7 @@ export const getSessionStatus = (service?: string) =>
 export const getServicesStatus = () =>
   call<ServiceStatus[]>("get_services_status", undefined, () => [
     { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Max 20x", live_status: "ok" },
+    { id: "codex", name: "Codex", logged_in: true, org_name: "Codex", email: "", subscription: "ChatGPT Plus", live_status: "ok" },
     { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@gmail.com", subscription: "Gemini Pro", live_status: "ok" },
     { id: "antigravity_ide", name: "Antigravity", logged_in: true, org_name: "", email: "", subscription: "", live_status: "ok" },
   ]);
@@ -298,6 +316,10 @@ export const setWidgetOpacity = (service: string, alpha: number) =>
   call<void>("set_widget_opacity", { service, alpha }, () => undefined);
 export const setWidgetVisible = (service: string, visible: boolean) =>
   call<void>("set_widget_visible", { service, visible }, () => undefined);
+export const setWidgetBaseSize = (service: string, width: number, height: number) =>
+  call<void>("set_widget_base_size", { service, width, height }, () => undefined);
+export const setWidgetMenuOpen = (service: string, open: boolean) =>
+  call<void>("set_widget_menu_open", { service, open }, () => undefined);
 
 // --- widget grid docking ---
 export const setDockConfig = (patch: DockConfigPatch) =>

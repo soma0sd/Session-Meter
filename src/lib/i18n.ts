@@ -21,6 +21,7 @@ const en: Dict = {
   "common.tomorrow": "Tomorrow",
   "common.notLoggedIn": "Not signed in",
   "common.sessionExpired": "Session expired - please sign in again",
+  "common.usageUnavailable": "Usage temporarily unavailable",
   "common.antigravityNotRunning": "Antigravity is not running",
 
   "bucket.five_hour": "Current session",
@@ -32,6 +33,7 @@ const en: Dict = {
   "bucket.gemini-weekly": "Gemini weekly",
   "bucket.3p-5h": "Claude/GPT 5-hour",
   "bucket.3p-weekly": "Claude/GPT weekly",
+  "bucket.codex-weekly": "Codex weekly",
 
   "menu.style": "Widget style",
   "menu.stats": "Statistics",
@@ -151,6 +153,7 @@ const ko: Dict = {
   "common.tomorrow": "내일",
   "common.notLoggedIn": "로그인 필요",
   "common.sessionExpired": "세션 만료 - 다시 로그인하세요",
+  "common.usageUnavailable": "사용량을 일시적으로 가져올 수 없음",
   "common.antigravityNotRunning": "Antigravity가 실행 중이 아님",
 
   "bucket.five_hour": "이번 세션",
@@ -162,6 +165,7 @@ const ko: Dict = {
   "bucket.gemini-weekly": "Gemini 주간",
   "bucket.3p-5h": "Claude/GPT 5시간",
   "bucket.3p-weekly": "Claude/GPT 주간",
+  "bucket.codex-weekly": "Codex 주간",
 
   "menu.style": "위젯 스타일",
   "menu.stats": "통계",

@@ -38,3 +38,34 @@ pub fn apply_snapshot(app: &AppHandle, snapshot: UsageSnapshot) {
     let _ = app.emit("usage://updated", &snapshot);
     tray::update_tray(app);
 }
+
+/// Preserve the most recent values while exposing a temporary fetch failure or expired
+/// browser session to every open view. Unlike `apply_snapshot`, this does not append an
+/// artificial point to quota history or evaluate notifications.
+pub fn mark_status(app: &AppHandle, service: &str, status: &str) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let snapshot = {
+        let mut snapshots = state.last_snapshot.lock().unwrap();
+        let snapshot = snapshots
+            .entry(service.to_string())
+            .or_insert_with(|| UsageSnapshot {
+                service_id: service.to_string(),
+                five_hour: None,
+                weekly_primary: None,
+                primary_key: None,
+                secondary_key: None,
+                buckets: Vec::new(),
+                organization_name: crate::service::display_name(service).to_string(),
+                account_email: String::new(),
+                subscription: String::new(),
+                fetched_at: crate::api::now_iso(),
+                status: status.to_string(),
+            });
+        snapshot.status = status.to_string();
+        snapshot.clone()
+    };
+    let _ = app.emit("usage://updated", &snapshot);
+    tray::update_tray(app);
+}

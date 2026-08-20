@@ -12,6 +12,9 @@ export interface WidgetStyleProps {
   primaryPct: number;
   /** Utilization % (0-100, used) of the secondary window (Claude: weekly). */
   secondaryPct: number;
+  /** Whether the snapshot has an actual secondary usage window. Omit for existing callers
+   * that always render a pair of windows. */
+  hasSecondary?: boolean;
   /** Milliseconds until each window resets (for the countdown labels). */
   primaryResetMs: number;
   secondaryResetMs: number;
@@ -53,9 +56,11 @@ export function catalogEntry(id: string): StyleCatalogEntry {
 }
 
 /** Per-service widget metric colours (RGB triplets for `rgb(var(--m1))`), matched to each
- * service's brand: Claude coral/amber, Gemini blue/purple, Antigravity IDE teal/violet. */
+ * service's brand: Claude coral/amber, Codex green/blue, Gemini blue/purple, Antigravity IDE
+ * teal/violet. */
 export const serviceColors: Record<string, { m1: string; m2: string }> = {
   claude: { m1: "217 119 87", m2: "224 164 88" },
+  codex: { m1: "16 185 129", m2: "59 130 246" },
   gemini: { m1: "66 133 244", m2: "167 85 247" },
   antigravity_ide: { m1: "20 184 166", m2: "139 92 246" },
 };
@@ -71,6 +76,7 @@ export function colorsFor(service: string): { m1: string; m2: string } {
  * both stay in sync as services are added. */
 export const serviceIcons: Record<string, string> = {
   claude: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1.7v12.6M1.7 8h12.6M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`,
+  codex: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.1 8 1.8l5 2.3v7.8L8 14.2l-5-2.3Z"/><path d="m5.5 6.2 2.5 1.4 2.5-1.4M8 7.6v3"/></svg>`,
   gemini: `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 1.5Q8 8 14.5 8Q8 8 8 14.5Q8 8 1.5 8Q8 8 8 1.5Z"/></svg>`,
   antigravity_ide: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 10.5 8 3.5l5.8 7"/><path d="M4.6 13.2 8 9l3.4 4.2"/></svg>`,
 };

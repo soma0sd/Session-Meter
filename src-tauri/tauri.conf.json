@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SessionMeter",
-  "version": "0.5.1",
+  "version": "1.0.0",
   "identifier": "sd.soma0.sessionmeter",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -101,8 +101,14 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": ["nsis"],
+    "licenseFile": "../LICENSE",
     "resources": {
-      "icons/icon.ico": "icon.ico"
+      "icons/icon.ico": "icon.ico",
+      "../LICENSE": "licenses/LICENSE",
+      "../THIRD_PARTY_LICENSES.md": "licenses/THIRD_PARTY_LICENSES.md",
+      "../src/assets/fonts/Noto-Sans-OFL.txt": "licenses/Noto-Sans-OFL.txt",
+      "../src/assets/fonts/Noto-Sans-KR-OFL.txt": "licenses/Noto-Sans-KR-OFL.txt",
+      "assets/fonts/OFL.txt": "licenses/tray-digits-OFL.txt"
     },
     "icon": [
       "icons/32x32.png",

@@ -3,6 +3,7 @@ mod api;
 mod auth;
 mod commands;
 mod config;
+mod codex;
 mod dock;
 mod error;
 mod gemini;
@@ -100,7 +101,9 @@ pub fn run() {
                 // external-URL webview during setup() fails silently on Windows, so we
                 // queue it (same path as the open_login_window command, which works).
                 let h = handle.clone();
-                let _ = handle.run_on_main_thread(move || windows::create_login_window(&h));
+                let _ = handle.run_on_main_thread(move || {
+                    windows::create_login_window(&h, service::CLAUDE)
+                });
             }
 
             // Poll immediately on start, then every refresh_interval_min.
@@ -130,16 +133,25 @@ pub fn run() {
                 {
                     if let Some(service) = windows::service_from_widget_label(window.label()) {
                         let app = window.app_handle();
-                        if dock::is_docked(app, &service) {
-                            let in_progress = app
-                                .try_state::<AppState>()
-                                .map(|s| s.dock_relayout_in_progress.load(Ordering::SeqCst))
-                                .unwrap_or(false);
-                            if !in_progress {
-                                dock::on_widget_moved(app, &service, pos.x, pos.y);
+                        // An upward compact-menu popover temporarily moves only the native
+                        // window to make transparent room above the fixed panel. Do not treat
+                        // that implementation detail as a user drag or a new dock anchor.
+                        let menu_open = app
+                            .try_state::<AppState>()
+                            .map(|s| s.widget_menus_open.lock().unwrap().contains(&service))
+                            .unwrap_or(false);
+                        if !menu_open {
+                            if dock::is_docked(app, &service) {
+                                let in_progress = app
+                                    .try_state::<AppState>()
+                                    .map(|s| s.dock_relayout_in_progress.load(Ordering::SeqCst))
+                                    .unwrap_or(false);
+                                if !in_progress {
+                                    dock::on_widget_moved(app, &service, pos.x, pos.y);
+                                }
+                            } else {
+                                windows::ensure_widget_on_screen(app, &service);
                             }
-                        } else {
-                            windows::ensure_widget_on_screen(app, &service);
                         }
                     }
                 }
@@ -154,9 +166,7 @@ pub fn run() {
             // UI thread cannot deadlock with webview teardown; also stop the watcher.
             WindowEvent::CloseRequested { api, .. } if window.label() == "login" => {
                 api.prevent_close();
-                if let Some(state) = window.app_handle().try_state::<AppState>() {
-                    state.login_watching.store(false, Ordering::SeqCst);
-                }
+                auth::cancel_capture_watch(window.app_handle());
                 let _ = window.hide();
             }
             _ => {}
@@ -190,6 +200,8 @@ pub fn run() {
             commands::set_move_lock,
             commands::set_widget_opacity,
             commands::set_widget_visible,
+            commands::set_widget_base_size,
+            commands::set_widget_menu_open,
             commands::set_dock_config,
             commands::dock_move_to,
             commands::dock_move_end,

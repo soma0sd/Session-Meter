@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
 
@@ -24,12 +24,21 @@ pub struct AppState {
     pub notify_state: Mutex<NotifyState>,
     /// True while a login-capture watcher is running (prevents duplicates).
     pub login_watching: AtomicBool,
+    /// Changes whenever a browser-login capture starts or is cancelled. A watcher only acts
+    /// while its own generation remains current, preventing a hidden previous login from
+    /// capturing cookies after the window has been re-used for another service.
+    pub login_capture_generation: AtomicU64,
     /// Latest available update (version + notes), set by the startup update check.
     pub update_available: Mutex<Option<crate::update::UpdateInfo>>,
     /// True while `dock::apply_layout` is repositioning docked widget windows. Lets the
     /// `WindowEvent::Moved` handler (and `apply_layout` itself) recognize its own relayout
     /// echoes instead of mistaking them for a user drag or re-entering the relayout.
     pub dock_relayout_in_progress: AtomicBool,
+    /// Physical panel size reported by each widget while no popover is open. Docking uses this
+    /// instead of the temporarily enlarged webview size of an open kebab popover.
+    pub widget_base_sizes: Mutex<HashMap<String, (i32, i32)>>,
+    /// Widgets whose kebab popover is currently open. This is transient UI state only.
+    pub widget_menus_open: Mutex<HashSet<String>>,
 }
 
 impl AppState {
@@ -43,8 +52,11 @@ impl AppState {
             last_double_ms: AtomicU64::new(0),
             notify_state: Mutex::new(NotifyState::default()),
             login_watching: AtomicBool::new(false),
+            login_capture_generation: AtomicU64::new(0),
             update_available: Mutex::new(None),
             dock_relayout_in_progress: AtomicBool::new(false),
+            widget_base_sizes: Mutex::new(HashMap::new()),
+            widget_menus_open: Mutex::new(HashSet::new()),
         }
     }
 }

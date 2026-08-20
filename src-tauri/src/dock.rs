@@ -49,6 +49,14 @@ fn active_members(app: &AppHandle, cfg: &DockConfig) -> Vec<String> {
 
 /// A service widget's live outer size, or the fallback if the window is missing/unreadable.
 fn live_size(app: &AppHandle, service: &str) -> (i32, i32) {
+    if let Some(state) = app.try_state::<AppState>() {
+        let menus = state.widget_menus_open.lock().unwrap();
+        if menus.contains(service) {
+            if let Some(size) = state.widget_base_sizes.lock().unwrap().get(service).copied() {
+                return size;
+            }
+        }
+    }
     app.get_webview_window(&widget_label(service))
         .and_then(|w| w.outer_size().ok())
         .map(|s| (s.width as i32, s.height as i32))
