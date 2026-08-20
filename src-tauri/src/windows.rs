@@ -461,6 +461,11 @@ pub fn reconcile_widget_visibility(app: &AppHandle) {
         if svc != "claude" {
             create_widget_window(app, &svc);
         }
+        // A service signed into while the app is already running (Codex, say) first shows up
+        // here, not in `show_widget`/`toggle_widget` - so this is where it has to be offered
+        // to the dock. Without it, a new provider's widget stayed outside the docked group
+        // until the next full restart re-ran `show_widget`.
+        crate::dock::on_membership_changed(app, &svc);
         let Some(win) = app.get_webview_window(&widget_label(&svc)) else {
             continue;
         };

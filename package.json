@@ -1,6 +1,6 @@
 {
   "name": "sessionmeter",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Claude, Codex, Gemini, and Antigravity usage tray, widget, and stats for the desktop",
   "type": "module",
   "license": "MIT",

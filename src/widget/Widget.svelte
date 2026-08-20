@@ -33,6 +33,9 @@
   // Below this content width, the tool icons are collapsed into a kebab dropdown so they
   // don't force the widget wider than its content.
   const ICON_ROW_MIN = 208;
+  // Gap between the panel and the kebab popover, which is anchored fully outside the panel so
+  // opening it never covers the usage readout the widget exists to show.
+  const MENU_GAP = 4;
 
   const SERVICE_NAMES: Record<string, string> = {
     claude: "Claude",
@@ -175,12 +178,12 @@
       if (!monitor) return false;
       const scale = monitor.scaleFactor || window.devicePixelRatio || 1;
       const workArea = monitor.workArea;
-      const menuH = menuEl.getBoundingClientRect().height;
-      const downExtra = Math.max(0, Math.ceil((34 + menuH - panelH) * scale));
-      const upExtra = Math.max(0, Math.ceil((menuH - 34) * scale));
+      // The popover sits entirely outside the panel (below it, or above it when flipped), so
+      // either direction needs the same amount of extra room: its own height plus the gap.
+      const extra = Math.max(0, Math.ceil((menuEl.getBoundingClientRect().height + MENU_GAP) * scale));
       const availableBelow = workArea.position.y + workArea.size.height - (position.y + Math.ceil(panelH * scale));
       const availableAbove = position.y - workArea.position.y;
-      return downExtra > availableBelow && availableAbove >= upExtra;
+      return extra > availableBelow && availableAbove >= extra;
     } catch {
       return false;
     }
@@ -232,7 +235,11 @@
     const popover = menuOpen && menuEl ? menuEl.getBoundingClientRect() : undefined;
     const visualTop = popover ? Math.min(r.top, popover.top) : r.top;
     const visualBottom = popover ? Math.max(r.bottom, popover.bottom) : r.bottom;
-    const w = panelW;
+    // The popover's labels are `nowrap` and can be wider than the panel that anchors it, so
+    // the window has to widen for it too - otherwise the menu text is cut off at the window
+    // edge. The panel itself is `width: max-content`, so the extra width stays transparent.
+    const visualRight = popover ? Math.max(r.right, popover.right) : r.right;
+    const w = Math.min(MAX_W, Math.max(panelW, Math.ceil(visualRight - r.left)));
     const h = Math.max(panelH, Math.ceil(visualBottom - visualTop));
     try {
       const { LogicalSize } = await import("@tauri-apps/api/dpi");
@@ -583,6 +590,7 @@
     display: block;
   }
   .panel {
+    position: relative;
     display: flex;
     flex-direction: column;
     /* Hug the content so the window can shrink to it (set by fitWindow). */
@@ -670,11 +678,21 @@
     opacity: 0.6;
   }
   .menu {
+    /* Anchored to `.panel` (which is `position: relative` for exactly this reason). Without
+       that, the containing block is the window itself, and the transparent top inset that
+       `fitWindow` adds for an upward popover moves the panel while leaving the popover
+       behind - it then hangs above y=0 and everything but its last row is clipped away by
+       the window edge. */
     position: absolute;
     z-index: 10;
-    top: 34px;
-    left: 10px;
-    right: 10px;
+    /* The 4px offsets here and on `.menu.up` mirror the `MENU_GAP` script constant. */
+    top: calc(100% + 4px);
+    left: 0;
+    /* Sized to its own labels, never narrower than the panel; `fitWindow` widens the window
+       to match so nothing is cut off. */
+    min-width: 100%;
+    width: max-content;
+    max-width: 340px;
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -686,7 +704,7 @@
   }
   .menu.up {
     top: auto;
-    bottom: calc(100% - 34px);
+    bottom: calc(100% + 4px);
     box-shadow: 0 -8px 22px rgb(0 0 0 / 0.22);
   }
   .mitem {

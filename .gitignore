@@ -36,6 +36,7 @@ raw_dump.json
 *.key
 .tauri/
 
-# Claude local files (memory + private instructions) - never commit
+# Agent-local files (memory + private instructions) - never commit
 .claude/
 CLAUDE.md
+AGENTS.md
