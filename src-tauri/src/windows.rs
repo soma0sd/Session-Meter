@@ -46,12 +46,11 @@ pub fn open_settings(app: &AppHandle) {
     show_and_focus(app, "settings");
 }
 
-/// Create (or focus) a browser-login window. Must run on the main thread.
-/// Spawns the Rust-driven capture watcher once the window exists.
+/// Create (or focus) Claude's browser-login window. Must run on the main thread.
+/// Codex and Gemini use isolated helper processes instead of this shared webview.
 pub fn create_login_window(app: &AppHandle, service: &str) {
     let (login_url, title) = match service {
         crate::service::CLAUDE => ("https://claude.ai/login", "Sign in to Claude"),
-        crate::service::CODEX => ("https://chatgpt.com/auth/login", "Sign in to Codex"),
         other => {
             eprintln!("[cg] unsupported browser login service: {other}");
             return;

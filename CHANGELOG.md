@@ -3,6 +3,15 @@
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르며, 버전은 [SemVer](https://semver.org/lang/ko/)를 따릅니다. 항목은 마이너 버전 단위로 묶습니다.
 
+## [1.0.1] - 2026-08-20
+
+### Fixed
+
+- **Codex 로그인 응답없음**: ChatGPT 로그인 창·사용량 성공 확인·쿠키 캡처를 앱 본체와 분리된 전용 프로세스로 실행해,
+  Cloudflare 검사 또는 WebView2 응답 정지로 트레이·설정·위젯이 함께 멈추던 문제 수정.
+- **ChatGPT Client Hints**: Gemini 로그인용 WebView2 Client Hint 비활성화 인수를 Codex·일반 앱 창에
+  적용하지 않도록 범위 분리.
+
 ## [1.0.0] - 2026-08-20
 
 ### Added
