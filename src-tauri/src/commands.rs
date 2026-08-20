@@ -262,15 +262,19 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
         .collect()
 }
 
-/// Open the login window for a service (Claude, Codex, and Gemini: Antigravity has no login at
-/// all, see `service::has_session`). Window creation is dispatched to the main thread
-/// (required on Windows).
+/// Open the login window for a service. Gemini and Codex run in an isolated helper process;
+/// Claude uses the shared main-process browser window. Antigravity has no login.
 #[tauri::command]
 pub fn open_login_window(app: AppHandle, service: Option<String>) -> Result<(), String> {
     let service = crate::service::normalize(service.as_deref());
-    // Gemini signs in via a separate helper process (Google blocks embedded webviews).
+    // Gemini and Codex sign in via a separate helper process so a wedged external page cannot
+    // block the main application's shared WebView2 UI thread.
     if service == crate::service::GEMINI {
         crate::gemini::start_login(&app);
+        return Ok(());
+    }
+    if service == crate::service::CODEX {
+        crate::codex::start_login(&app);
         return Ok(());
     }
     // One browser-login capture may run at a time. Keep the visible page and its watcher intact
@@ -281,8 +285,8 @@ pub fn open_login_window(app: AppHandle, service: Option<String>) -> Result<(), 
             return Ok(());
         }
     }
-    // Claude and Codex share a hidden-on-close webview. The helper re-navigates it only after
-    // its previous watcher has been cancelled by the close event.
+    // Claude reuses a hidden-on-close webview only after its previous watcher has been cancelled
+    // by the close event.
     let app2 = app.clone();
     app.run_on_main_thread(move || windows::create_login_window(&app2, &service))
         .map_err(|e| e.to_string())
@@ -295,6 +299,9 @@ pub async fn capture_session(
     service: Option<String>,
 ) -> Result<SessionStatus, String> {
     let service = crate::service::normalize(service.as_deref());
+    if service == crate::service::CODEX {
+        return Err("Codex sign-in is captured by the isolated login helper".to_string());
+    }
     let cookie = auth::capture_cookie(&app, &service)
         .await
         .map_err(|e| e.to_string())?;
@@ -348,6 +355,9 @@ pub fn clear_session(
     service: Option<String>,
 ) -> Result<(), String> {
     let service = crate::service::normalize(service.as_deref());
+    if service == crate::service::CODEX {
+        return crate::codex::clear_session(&app).map_err(|error| error.to_string());
+    }
     config::clear_cookie(&app, &service).map_err(|e| e.to_string())?;
     crate::usage::mark_status(&app, &service, "not_logged_in");
     if service != crate::service::CLAUDE {

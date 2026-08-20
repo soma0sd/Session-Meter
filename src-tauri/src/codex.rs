@@ -7,14 +7,57 @@
 //! `secondary_window` names describe roles, not durations, so their
 //! `limit_window_seconds` value determines which response window is eligible.
 
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
 use serde_json::{Map, Value};
+use tauri::{AppHandle, Emitter, Manager};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::api::{Bucket, UsageSnapshot, WindowUsage};
+use crate::config;
 use crate::error::AppError;
+use crate::state::AppState;
 
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const WEEKLY_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(295);
+const LOGIN_RESULT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+// A Codex sign-in owns a disposable WebView2 profile. Do not allow two helpers to touch it or
+// present duplicate login windows at the same time.
+static CODEX_LOGIN_BUSY: AtomicBool = AtomicBool::new(false);
+static CODEX_LOGIN_EPOCH: AtomicU64 = AtomicU64::new(0);
+static CODEX_SESSION_LOCK: Mutex<()> = Mutex::new(());
+
+struct LoginGuard;
+
+impl LoginGuard {
+    fn try_acquire() -> Option<Self> {
+        (!CODEX_LOGIN_BUSY.swap(true, Ordering::SeqCst)).then_some(Self)
+    }
+}
+
+impl Drop for LoginGuard {
+    fn drop(&mut self) {
+        CODEX_LOGIN_BUSY.store(false, Ordering::SeqCst);
+    }
+}
+
+fn session_lock() -> MutexGuard<'static, ()> {
+    CODEX_SESSION_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn login_is_current(epoch: u64) -> bool {
+    CODEX_LOGIN_EPOCH.load(Ordering::SeqCst) == epoch
+}
 
 fn reset_iso(value: &Value) -> Result<String, AppError> {
     let secs = value
@@ -67,9 +110,7 @@ fn weekly_window<'a>(limits: &'a Map<String, Value>) -> Option<&'a Value> {
         .iter()
         .filter_map(|key| limits.get(*key))
         .find(|window| {
-            window
-                .get("limit_window_seconds")
-                .and_then(Value::as_u64)
+            window.get("limit_window_seconds").and_then(Value::as_u64)
                 == Some(WEEKLY_WINDOW_SECONDS)
         })
 }
@@ -129,6 +170,216 @@ pub async fn fetch_usage(
         .await
         .map_err(|e| AppError::Parse(e.to_string()))?;
     parse_usage(&raw)
+}
+
+/// Start a disposable, isolated Codex login webview. The helper must first prove that its browser
+/// session can fetch the usage endpoint. This parent process then validates the returned cookie a
+/// second time before DPAPI-backed persistence, so no helper output can create a signed-in state
+/// on its own.
+pub fn start_login(app: &AppHandle) {
+    // Take this synchronously so a second Settings click cannot enqueue an otherwise harmless
+    // helper that would invalidate the first attempt's completion epoch.
+    let Some(login_guard) = LoginGuard::try_acquire() else {
+        return;
+    };
+    let epoch = {
+        let _session_guard = session_lock();
+        CODEX_LOGIN_EPOCH.fetch_add(1, Ordering::SeqCst) + 1
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _login_guard = login_guard;
+
+        let profile = helper_profile_dir();
+        if std::fs::create_dir_all(&profile).is_err() {
+            if login_is_current(epoch) {
+                crate::usage::mark_status(&app, crate::service::CODEX, "error");
+            }
+            return;
+        }
+
+        let mut child = {
+            // If logout won the race before this background task launched, never present a stale
+            // helper window. Holding the lock only around `spawn` also orders this with logout
+            // without blocking it during user interaction.
+            let _session_guard = session_lock();
+            if !login_is_current(epoch) {
+                let _ = std::fs::remove_dir_all(&profile);
+                return;
+            }
+            spawn_login_helper(&profile)
+        };
+        let result = match child.as_mut() {
+            Ok(child) => read_result(child, LOGIN_TIMEOUT, epoch),
+            Err(_) => None,
+        };
+        // The helper is reaped by `read_result` before this directory is removed. The profile is
+        // intentionally temporary because the encrypted session file is the sole persisted copy.
+        let _ = std::fs::remove_dir_all(&profile);
+
+        let Some(cookie) = result.as_deref().and_then(helper_cookie) else {
+            if login_is_current(epoch) && !matches!(result.as_deref(), Some("CANCELLED")) {
+                crate::usage::mark_status(&app, crate::service::CODEX, "error");
+            }
+            return;
+        };
+
+        if !login_is_current(epoch) {
+            return;
+        }
+
+        let Some(client) = app
+            .try_state::<AppState>()
+            .map(|state| state.client.clone())
+        else {
+            if login_is_current(epoch) {
+                crate::usage::mark_status(&app, crate::service::CODEX, "error");
+            }
+            return;
+        };
+        let snapshot = match tauri::async_runtime::block_on(fetch_usage(&client, cookie)) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let status = if matches!(error, AppError::Unauthorized) {
+                    "unauthorized"
+                } else {
+                    "error"
+                };
+                if login_is_current(epoch) {
+                    crate::usage::mark_status(&app, crate::service::CODEX, status);
+                }
+                return;
+            }
+        };
+
+        // Serialize persistence and UI transition with logout. A late helper result must never
+        // restore a session that the user explicitly removed while the login was open.
+        let _session_guard = session_lock();
+        if !login_is_current(epoch) {
+            return;
+        }
+        if config::save_cookie(&app, crate::service::CODEX, cookie).is_err() {
+            crate::usage::mark_status(&app, crate::service::CODEX, "error");
+            return;
+        }
+
+        let org_name = snapshot.organization_name.clone();
+        let email = snapshot.account_email.clone();
+        crate::usage::apply_snapshot(&app, snapshot);
+        let _ = app.emit(
+            "session://changed",
+            serde_json::json!({
+                "service": crate::service::CODEX,
+                "logged_in": true,
+                "org_name": org_name,
+                "email": email,
+            }),
+        );
+        let app_for_windows = app.clone();
+        drop(_session_guard);
+        let _ = app.run_on_main_thread(move || {
+            crate::windows::reconcile_widget_visibility(&app_for_windows);
+        });
+    });
+}
+
+/// Clear the persisted Codex session and invalidate any helper attempt that was already open.
+/// The same lock used by `start_login` prevents a late helper result from restoring this session.
+pub fn clear_session(app: &AppHandle) -> Result<(), AppError> {
+    let _session_guard = session_lock();
+    CODEX_LOGIN_EPOCH.fetch_add(1, Ordering::SeqCst);
+    config::clear_cookie(app, crate::service::CODEX)?;
+    crate::usage::mark_status(app, crate::service::CODEX, "not_logged_in");
+    crate::windows::hide_runtime_widget(app, crate::service::CODEX);
+    let _ = app.emit(
+        "session://changed",
+        serde_json::json!({
+            "service": crate::service::CODEX,
+            "logged_in": false,
+            "org_name": "",
+            "email": "",
+        }),
+    );
+    Ok(())
+}
+
+/// Return the short-lived WebView2 user-data folder for one helper invocation. A time component
+/// prevents stale folders from a killed process colliding with a later user sign-in.
+fn helper_profile_dir() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "sessionmeter-codex-login-{}-{nonce}",
+        std::process::id()
+    ))
+}
+
+/// Spawn the same executable in its bare tao+wry helper mode. Explicitly remove the Gemini-only
+/// client-hint override in case this application was started from an environment that supplied it.
+fn spawn_login_helper(profile: &Path) -> std::io::Result<Child> {
+    let exe = std::env::current_exe()?;
+    Command::new(exe)
+        .env("SM_CODEX_MODE", "login")
+        .env("SM_CODEX_UDF", profile)
+        .env_remove("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+}
+
+/// Receive a helper result within the deadline, then always terminate and reap the helper. The
+/// short polling interval also observes logout promptly, so its stale helper process does not
+/// keep the single-login guard occupied until the full interactive timeout elapses.
+fn read_result(child: &mut Child, timeout: Duration, epoch: u64) -> Option<String> {
+    let stdout = child.stdout.take()?;
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(payload) = line.strip_prefix("SM_RESULT ") {
+                let _ = sender.send(payload.to_string());
+                break;
+            }
+        }
+    });
+    let payload = wait_for_result(&receiver, timeout, || !login_is_current(epoch));
+    let _ = child.kill();
+    let _ = child.wait();
+    payload
+}
+
+fn wait_for_result<F>(
+    receiver: &mpsc::Receiver<String>,
+    timeout: Duration,
+    mut is_stale: F,
+) -> Option<String>
+where
+    F: FnMut() -> bool,
+{
+    let started = Instant::now();
+    loop {
+        if is_stale() {
+            return None;
+        }
+        let remaining = timeout.checked_sub(started.elapsed())?;
+        match receiver.recv_timeout(result_poll_delay(remaining)) {
+            Ok(payload) => return Some(payload),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return None,
+        }
+    }
+}
+
+fn result_poll_delay(remaining: Duration) -> Duration {
+    remaining.min(LOGIN_RESULT_POLL_INTERVAL)
+}
+
+/// Accept only the helper's single-line cookie transport. Never log this payload.
+fn helper_cookie(payload: &str) -> Option<&str> {
+    payload
+        .strip_prefix("COOKIE ")
+        .filter(|cookie| !cookie.is_empty() && !cookie.contains(['\r', '\n']))
 }
 
 fn ensure_success(code: u16) -> Result<(), AppError> {
@@ -208,5 +459,28 @@ mod tests {
         assert!(matches!(ensure_success(403), Err(AppError::Unauthorized)));
         assert!(matches!(ensure_success(500), Err(AppError::Http(_))));
         assert!(ensure_success(200).is_ok());
+    }
+
+    #[test]
+    fn accepts_only_single_line_helper_cookie_transport() {
+        assert_eq!(helper_cookie("COOKIE session=value"), Some("session=value"));
+        assert!(helper_cookie("COOKIE ").is_none());
+        assert!(helper_cookie("COOKIE session=value\nnext").is_none());
+        assert!(helper_cookie("CANCELLED").is_none());
+    }
+
+    #[test]
+    fn helper_result_poll_is_bounded_and_cancellable() {
+        assert_eq!(
+            result_poll_delay(Duration::from_secs(1)),
+            LOGIN_RESULT_POLL_INTERVAL
+        );
+        assert_eq!(
+            result_poll_delay(Duration::from_millis(10)),
+            Duration::from_millis(10)
+        );
+
+        let (_sender, receiver) = std::sync::mpsc::channel::<String>();
+        assert!(wait_for_result(&receiver, Duration::from_secs(1), || true).is_none());
     }
 }

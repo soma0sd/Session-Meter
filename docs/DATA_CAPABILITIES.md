@@ -7,7 +7,7 @@ SessionMeter가 서비스별 사용량에 대해 얻을 수 있는 정보, 범�
 | 서비스 | 출처와 인증 | 지원 범위 |
 | --- | --- | --- |
 | Claude | `claude.ai` 비공개 웹 API와 앱 내 로그인 창에서 확보한 브라우저 세션 쿠키 | 5시간·주간 및 응답에서 발견되는 사용량 버킷 |
-| Codex | `chatgpt.com` 비공개 사용량 엔드포인트와 앱 내 ChatGPT 로그인 세션 쿠키 | `limit_window_seconds`가 `604800`인 Codex 주간 한도만 |
+| Codex | `chatgpt.com` 비공개 사용량 엔드포인트와 전용 격리 프로세스의 ChatGPT 로그인 세션 쿠키 | `limit_window_seconds`가 `604800`인 Codex 주간 한도만 |
 | Gemini | `gemini.google.com/usage` 화면 스크래핑과 별도 프로세스 로그인 창 | 화면에 표시되는 구독 사용량, 실험적 기능 |
 | Antigravity IDE | 실행 중인 IDE의 비공개 로컬 loopback API | Gemini 및 Claude/GPT 모델군의 코딩 쿼터, Windows 전용 |
 
@@ -36,12 +36,16 @@ Claude 요청 흐름:
 
 Codex 요청 흐름:
 
-1. 앱 내 `https://chatgpt.com/auth/login` 창에서 본인 ChatGPT 계정 로그인
+1. 앱 본체와 분리된 전용 프로세스의 `https://chatgpt.com/auth/login` 창에서 본인 ChatGPT 계정 로그인
 2. `GET https://chatgpt.com/backend-api/wham/usage`으로 구독 한도 조회
 
 `chatgpt.com` 세션 쿠키와 `OAI-App-Brand: codex` 요청 헤더를 사용합니다. 응답의 `401/403`은
 세션 만료로 처리하며, 새 로그인 전까지 기존 정상 스냅샷을 보존합니다. 이 엔드포인트와 쿠키 형식은
 공개 계약이 아닙니다.
+
+로그인 창은 Gemini와 별개인 전용 WebView2 프로세스에서 실행합니다. ChatGPT의 Cloudflare 검사나
+WebView2 렌더링 정지가 발생해도 앱 본체의 트레이·설정·위젯은 영향을 받지 않습니다. 부모 프로세스는
+전용 파이프를 통해 받은 쿠키를 사용량 엔드포인트로 검증한 뒤에만 DPAPI 저장을 수행합니다.
 
 | 필드 | 의미 | 사용처 |
 | --- | --- | --- |

@@ -4,6 +4,7 @@ mod auth;
 mod commands;
 mod config;
 mod codex;
+mod codex_helper;
 mod dock;
 mod error;
 mod gemini;
@@ -29,24 +30,27 @@ use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // The WebView2 loader reads this env var and applies the same browser args to EVERY WebView2
-    // environment in the process, so there is no second-environment conflict (unlike per-window
-    // additional_browser_args). We keep WRY's own default disabled features, additionally disable
-    // User-Agent Client Hints (so the Firefox UA spoof on the Gemini login window stays coherent:
-    // WebView2 otherwise leaks Edge branding via Sec-CH-UA and Google flags the mismatch), and
-    // drop the AutomationControlled blink flag. Must be set before the first webview is created.
-    #[cfg(windows)]
-    std::env::set_var(
-        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,UserAgentClientHint \
-         --disable-blink-features=AutomationControlled",
-    );
-
     // Gemini helper mode: the main app relaunched this binary to host the Google login/scrape
     // webview in a SEPARATE process (its own UI thread), so a wedged Google page cannot freeze the
     // main app. Run the bare tao+wry helper and exit without building the full app.
     if let Ok(mode) = std::env::var("SM_GEMINI_MODE") {
+        // The Firefox UA used only by the Gemini helper cannot send Chromium client hints.
+        // Set this process-wide WebView2 option only in that helper, never in the main process
+        // or the Codex helper, which both use the normal WebView2 browser identity.
+        #[cfg(windows)]
+        std::env::set_var(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,UserAgentClientHint \
+             --disable-blink-features=AutomationControlled",
+        );
         gemini_helper::run(&mode);
+        return;
+    }
+
+    // Codex uses the same disposable-process pattern, but retains WebView2's normal user agent
+    // and Client Hints so chatgpt.com receives a coherent Chromium browser identity.
+    if let Ok(mode) = std::env::var("SM_CODEX_MODE") {
+        codex_helper::run(&mode);
         return;
     }
 

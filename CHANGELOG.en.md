@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.0.1] - 2026-08-20
+
+### Fixed
+
+- **Codex sign-in freeze**: moved the ChatGPT login window, in-page usage confirmation, and cookie
+  capture into a dedicated helper process. The parent revalidates the returned cookie before DPAPI
+  storage, and a Cloudflare check or WebView2 stall cannot freeze the tray, settings, or widgets.
+- **ChatGPT Client Hints**: restricted the WebView2 Client Hint disabling arguments used for Gemini
+  login so they are not applied to Codex or ordinary app windows.
+
 ## [1.0.0] - 2026-08-20
 
 ### Added
