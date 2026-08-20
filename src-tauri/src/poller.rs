@@ -31,19 +31,69 @@ async fn poll_once(app: &AppHandle) {
         return;
     };
     for svc in services {
-        match service::fetch(app, &svc, &client).await {
+        // Keep the exact Codex credential that started the request. Every Codex result state
+        // transition must be conditional on it still being persisted when the request returns.
+        // The other providers retain their established fetch path and invalidation behavior.
+        let (result, codex_session) = if svc == service::CODEX {
+            match crate::config::load_cookie(app, &svc) {
+                Some(session) => {
+                    let result = service::fetch_with_cookie(&svc, &client, &session).await;
+                    (result, Some(session))
+                }
+                None => (Err(AppError::NoSession), None),
+            }
+        } else {
+            (service::fetch(app, &svc, &client).await, None)
+        };
+        match result {
             Ok(snapshot) => {
+                let organization_name = snapshot.organization_name.clone();
+                let bucket_count = snapshot.buckets.len();
+                let primary_remaining = snapshot.five_hour.as_ref().map(|window| window.remaining);
+                let applied = if svc == service::CODEX {
+                    match codex_session.as_deref() {
+                        Some(expected_session) => crate::codex::apply_snapshot_if_session_current(
+                            app,
+                            expected_session,
+                            snapshot,
+                        ),
+                        None => false,
+                    }
+                } else {
+                    usage::apply_snapshot(app, snapshot);
+                    true
+                };
+                if !applied {
+                    eprintln!("[cg] ignored stale Codex poll result");
+                    continue;
+                }
                 eprintln!(
                     "[cg] poll ok: service='{}' org='{}' buckets={} primary={:?}",
-                    svc,
-                    snapshot.organization_name,
-                    snapshot.buckets.len(),
-                    snapshot.five_hour.as_ref().map(|w| w.remaining)
+                    svc, organization_name, bucket_count, primary_remaining,
                 );
-                usage::apply_snapshot(app, snapshot);
             }
             Err(AppError::Unauthorized) => {
                 eprintln!("[cg] poll: unauthorized ({svc}, session expired)");
+                if svc == service::CODEX {
+                    let Some(expected_session) = codex_session.as_deref() else {
+                        continue;
+                    };
+                    match crate::codex::invalidate_session_if_current(app, expected_session) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            eprintln!("[cg] ignored stale Codex session expiry");
+                        }
+                        Err(error) => {
+                            // The Codex helper already updated its status while holding its
+                            // session lock. Preserve that fail-closed UI state without allowing
+                            // a generic poll branch to overwrite a newer login.
+                            eprintln!(
+                                "[cg] could not fully invalidate expired Codex session: {error}"
+                            );
+                        }
+                    }
+                    continue;
+                }
                 if let Err(error) = crate::config::invalidate_cookie(app, &svc) {
                     // `invalidate_cookie` writes a fail-closed marker before deleting the
                     // credential whenever possible, so this error cannot resurrect an expired
@@ -79,7 +129,21 @@ async fn poll_once(app: &AppHandle) {
             }
             Err(e) => {
                 eprintln!("[cg] poll error ({svc}): {e}");
-                usage::mark_status(app, &svc, "error");
+                if svc == service::CODEX {
+                    let transitioned = match codex_session.as_deref() {
+                        Some(expected_session) => crate::codex::mark_status_if_session_current(
+                            app,
+                            expected_session,
+                            "error",
+                        ),
+                        None => false,
+                    };
+                    if !transitioned {
+                        eprintln!("[cg] ignored stale Codex poll error");
+                    }
+                } else {
+                    usage::mark_status(app, &svc, "error");
+                }
             }
         }
     }

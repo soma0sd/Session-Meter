@@ -37,15 +37,19 @@ Claude 요청 흐름:
 Codex 요청 흐름:
 
 1. 앱 본체와 분리된 전용 프로세스의 `https://chatgpt.com/auth/login` 창에서 본인 ChatGPT 계정 로그인
-2. `GET https://chatgpt.com/backend-api/wham/usage`으로 구독 한도 조회
+2. `GET https://chatgpt.com/api/auth/session`에서 짧은 OAuth access token과 ChatGPT 계정 컨텍스트 확인
+3. `GET https://chatgpt.com/backend-api/wham/usage`으로 구독 한도 조회
 
-`chatgpt.com` 세션 쿠키와 `OAI-App-Brand: codex` 요청 헤더를 사용합니다. 응답의 `401/403`은
+`chatgpt.com` 세션 쿠키로 access token을 매 조회마다 다시 얻고, `Authorization: Bearer`,
+`ChatGPT-Account-ID`, `OAI-Product-Sku: codex` 헤더로 사용량을 요청합니다. access token은 메모리에서만
+사용하고 저장하지 않습니다. 응답의 `401/403`과 access token이 없는 명시적 로그아웃 세션 응답은
 세션 만료로 처리하며, 새 로그인 전까지 기존 정상 스냅샷을 보존합니다. 이 엔드포인트와 쿠키 형식은
 공개 계약이 아닙니다.
 
 로그인 창은 Gemini와 별개인 전용 WebView2 프로세스에서 실행합니다. ChatGPT의 Cloudflare 검사나
 WebView2 렌더링 정지가 발생해도 앱 본체의 트레이·설정·위젯은 영향을 받지 않습니다. 부모 프로세스는
-전용 파이프를 통해 받은 쿠키를 사용량 엔드포인트로 검증한 뒤에만 DPAPI 저장을 수행합니다.
+전용 파이프를 통해 받은 쿠키를 OAuth bearer 사용량 요청으로 검증한 뒤에만 DPAPI 저장을 수행합니다.
+CookieManager 완료 콜백은 비동기로 처리하므로 로그인 완료 뒤 창이 UI 이벤트 루프에 멈추지 않습니다.
 
 | 필드 | 의미 | 사용처 |
 | --- | --- | --- |
@@ -70,8 +74,9 @@ Codex 표시 값은 `primary_window`와 `secondary_window` 중 `limit_window_sec
 
 브라우저 로그인 서비스의 쿠키는 설정 파일과 분리된 OS 애플리케이션 데이터 폴더에 서비스별로 저장됩니다.
 Claude는 기존 세션 호환성을 위해 `session.dat`, Codex는 `session.codex.dat`, Gemini는
-`session.gemini.dat`를 사용합니다. 쿠키는 각 서비스의 HTTPS 요청에만 전송되며, Antigravity IDE는
-로컬 loopback API만 사용하므로 브라우저 세션을 저장하지 않습니다.
+`session.gemini.dat`를 사용합니다. Codex 파일에는 Cloudflare 세션 연속성을 위한 브라우저 User-Agent가
+쿠키와 함께 암호화되어 저장될 수 있으며, OAuth access token은 저장하지 않습니다. 쿠키는 각 서비스의
+HTTPS 요청에만 전송되며, Antigravity IDE는 로컬 loopback API만 사용하므로 브라우저 세션을 저장하지 않습니다.
 
 - **Windows 암호화**: 모든 브라우저 세션 파일을 사용자 범위 Windows DPAPI로 보호. 다른 사용자·오프라인
   디스크·복사된 백업에서는 복호화 불가
