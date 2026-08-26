@@ -33,6 +33,7 @@ const en: Dict = {
   "bucket.gemini-weekly": "Gemini weekly",
   "bucket.3p-5h": "Claude/GPT 5-hour",
   "bucket.3p-weekly": "Claude/GPT weekly",
+  "bucket.codex-5h": "Codex 5-hour",
   "bucket.codex-weekly": "Codex weekly",
 
   "menu.style": "Widget style",
@@ -165,6 +166,7 @@ const ko: Dict = {
   "bucket.gemini-weekly": "Gemini 주간",
   "bucket.3p-5h": "Claude/GPT 5시간",
   "bucket.3p-weekly": "Claude/GPT 주간",
+  "bucket.codex-5h": "Codex 5시간",
   "bucket.codex-weekly": "Codex 주간",
 
   "menu.style": "위젯 스타일",

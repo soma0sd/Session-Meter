@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.1.0] - 2026-08-26
+
+### Added
+
+- **Codex 5-hour session**: ChatGPT reports the Codex 5-hour session limit again, so SessionMeter
+  shows it alongside the weekly quota. The session window becomes the headline window and the
+  weekly quota the secondary one, matching how Claude is displayed across the widget, stats,
+  history, and notifications. Plans without a 5-hour session limit (ChatGPT Pro, for example)
+  keep showing the weekly quota alone, as before.
+
+### Changed
+
+- **Codex history migration**: existing Codex history stored the weekly quota in the headline
+  slot. Once a session window is seen, past points move to the secondary series automatically,
+  so the weekly trend in the Stats window stays continuous.
+
 ## [1.0.3] - 2026-08-20
 
 ### Fixed

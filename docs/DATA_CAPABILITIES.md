@@ -7,7 +7,7 @@ SessionMeter가 서비스별 사용량에 대해 얻을 수 있는 정보, 범�
 | 서비스 | 출처와 인증 | 지원 범위 |
 | --- | --- | --- |
 | Claude | `claude.ai` 비공개 웹 API와 앱 내 로그인 창에서 확보한 브라우저 세션 쿠키 | 5시간·주간 및 응답에서 발견되는 사용량 버킷 |
-| Codex | `chatgpt.com` 비공개 사용량 엔드포인트와 전용 격리 프로세스의 ChatGPT 로그인 세션 쿠키 | `limit_window_seconds`가 `604800`인 Codex 주간 한도만 |
+| Codex | `chatgpt.com` 비공개 사용량 엔드포인트와 전용 격리 프로세스의 ChatGPT 로그인 세션 쿠키 | 요금제가 제공하는 `limit_window_seconds` `18000`(5시간 세션)·`604800`(주간) 한도 |
 | Gemini | `gemini.google.com/usage` 화면 스크래핑과 별도 프로세스 로그인 창 | 화면에 표시되는 구독 사용량, 실험적 기능 |
 | Antigravity IDE | 실행 중인 IDE의 비공개 로컬 loopback API | Gemini 및 Claude/GPT 모델군의 코딩 쿼터, Windows 전용 |
 
@@ -53,20 +53,22 @@ CookieManager 완료 콜백은 비동기로 처리하므로 로그인 완료 뒤
 
 | 필드 | 의미 | 사용처 |
 | --- | --- | --- |
-| `rate_limit.primary_window` / `secondary_window`의 `used_percent` / `reset_at` | `limit_window_seconds`가 `604800`인 창의 Codex 주간 사용률 %와 초기화 Unix 시각 | 트레이·위젯·통계 |
-| `rate_limit.primary_window` / `secondary_window`의 `limit_window_seconds` | 한도 창 길이 | `604800`초 주간 창만 선택 |
+| `rate_limit.primary_window` / `secondary_window`의 `used_percent` / `reset_at` | 5시간 세션 창과 주간 창의 사용률 %와 초기화 Unix 시각 | 트레이·위젯·통계 |
+| `rate_limit.primary_window` / `secondary_window`의 `limit_window_seconds` | 한도 창 길이 | `18000`초 세션 창과 `604800`초 주간 창 식별 |
 | `plan_type` | 응답이 제공하는 ChatGPT 플랜 식별자 | 설정 계정 패널 |
 
-Codex 표시 값은 `primary_window`와 `secondary_window` 중 `limit_window_seconds`가 `604800`인 주간 창만
-사용합니다. 서버가 반환한 사용률을 0부터 100까지 정규화해 남은 사용량 `%`와 초기화까지 남은 시간으로
-변환합니다. 5시간 창과 그 밖의 추가 창은 표시하거나 이력에 저장하지 않습니다.
+Codex 표시 값은 `primary_window`와 `secondary_window` 중 `limit_window_seconds`가 `18000`(5시간 세션)
+또는 `604800`(주간)인 창을 사용합니다. 창의 역할은 응답 슬롯 이름이 아니라 길이로 판별합니다. 서버가
+반환한 사용률을 0부터 100까지 정규화해 남은 사용량 `%`와 초기화까지 남은 시간으로 변환합니다. 5시간
+세션 창은 요금제에 따라 제공되지 않을 수 있으며(예: ChatGPT Pro), 이 경우 주간 창이 기본 창이 됩니다.
+그 밖의 길이를 가진 추가 창은 표시하거나 이력에 저장하지 않습니다.
 
 ## 공통 계산과 범위
 
 - **남은 사용량 %**: 버킷별 `max(0, 100 - utilization)`
 - **초기화까지 남은 시간**: 서비스 응답의 초기화 시각 기준 실시간 카운트다운
 - **로컬 사용 이력·소진 예측·알림**: 폴링 표본과 설정 기준으로 앱에서 계산
-- **Codex 범위 제외**: 5시간 세션, OpenAI API 토큰 사용량·비용·조직 사용량, 별도 모델별 한도 및 `604800`초가 아닌 추가 한도 창
+- **Codex 범위 제외**: OpenAI API 토큰 사용량·비용·조직 사용량, 별도 모델별 한도 및 `18000`·`604800`초가 아닌 추가 한도 창
 - **Claude 범위 제외**: Anthropic Admin API의 개발자 API 토큰 사용량·USD 비용, 원시 토큰 수와 내부 한도값
 - **공식 API 대체 아님**: 각 서비스의 구독 세션 한도와 개발자 API 사용량은 서로 다른 지표
 
