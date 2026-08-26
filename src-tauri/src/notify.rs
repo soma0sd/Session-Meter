@@ -61,8 +61,8 @@ pub fn evaluate(app: &AppHandle, snapshot: &UsageSnapshot) {
             }
         }
 
-        // A weekly key always uses the weekly threshold, including Codex whose weekly quota
-        // occupies the shared primary serialization slot for compatibility.
+        // A weekly key always uses the weekly threshold, whichever slot it occupies: on a plan
+        // without a 5-hour session window, Codex's weekly quota is also its headline window.
         let is_weekly = b.key.contains("week") || b.key.contains("seven_day");
         let threshold = if is_weekly {
             settings.notify.weekly_threshold

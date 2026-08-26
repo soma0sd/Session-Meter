@@ -2,10 +2,10 @@
 //!
 //! Codex subscription limits are not exposed through the public OpenAI API. The Codex
 //! desktop client currently reads the authenticated ChatGPT web endpoint below. Keep this
-//! adapter deliberately small and defensive: SessionMeter intentionally exposes only the
-//! seven-day Codex subscription window. The endpoint's `primary_window` and
-//! `secondary_window` names describe roles, not durations, so their
-//! `limit_window_seconds` value determines which response window is eligible.
+//! adapter deliberately small and defensive: SessionMeter exposes the 5-hour session window
+//! and the seven-day subscription window, whichever of them the plan reports. The endpoint's
+//! `primary_window` and `secondary_window` names describe roles, not durations, so their
+//! `limit_window_seconds` value decides which window is which.
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -34,6 +34,11 @@ const SESSION_URL: &str = "https://chatgpt.com/api/auth/session";
 const CHATGPT_ORIGIN: &str = "https://chatgpt.com";
 const CHATGPT_REFERER: &str = "https://chatgpt.com/";
 const WEEKLY_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
+const SESSION_WINDOW_SECONDS: u64 = 5 * 60 * 60;
+/// Bucket ids stay stable across releases: history, notification thresholds, and the widget's
+/// per-service primary/secondary override are all stored by bucket id.
+const SESSION_KEY: &str = "codex-5h";
+const WEEKLY_KEY: &str = "codex-weekly";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(295);
 const LOGIN_RESULT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -122,44 +127,34 @@ fn reset_iso(value: &Value) -> Result<String, AppError> {
         .map_err(|e| AppError::Parse(e.to_string()))
 }
 
-fn weekly_bucket_from(raw: &Value) -> Result<Bucket, AppError> {
+fn bucket_from(raw: &Value, key: &str, label: &str) -> Result<Bucket, AppError> {
     let used = raw
         .get("used_percent")
         .and_then(Value::as_f64)
         .filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
         .ok_or_else(|| AppError::Parse("Codex used_percent is invalid".to_string()))?;
-    let seconds = raw
-        .get("limit_window_seconds")
-        .and_then(Value::as_u64)
-        .filter(|&v| v > 0)
-        .ok_or_else(|| AppError::Parse("Codex limit_window_seconds is invalid".to_string()))?;
-    if seconds != WEEKLY_WINDOW_SECONDS {
-        return Err(AppError::Parse(
-            "Codex weekly limit_window_seconds is invalid".to_string(),
-        ));
-    }
     let resets_at = reset_iso(
         raw.get("reset_at")
             .ok_or_else(|| AppError::Parse("Codex reset_at is missing".to_string()))?,
     )?;
     let utilization = used.round() as u8;
     Ok(Bucket {
-        key: "codex-weekly".to_string(),
-        label: "Codex weekly".to_string(),
+        key: key.to_string(),
+        label: label.to_string(),
         remaining: 100u8.saturating_sub(utilization),
         utilization,
         resets_at,
     })
 }
 
-fn weekly_window<'a>(limits: &'a Map<String, Value>) -> Option<&'a Value> {
+/// Pick the response window whose declared duration matches `seconds`. The slot names
+/// describe roles, not durations, and the same account can report a window in either slot,
+/// so the duration - never the slot name - decides what a window is.
+fn window_with(limits: &Map<String, Value>, seconds: u64) -> Option<&Value> {
     ["primary_window", "secondary_window"]
         .iter()
         .filter_map(|key| limits.get(*key))
-        .find(|window| {
-            window.get("limit_window_seconds").and_then(Value::as_u64)
-                == Some(WEEKLY_WINDOW_SECONDS)
-        })
+        .find(|window| window.get("limit_window_seconds").and_then(Value::as_u64) == Some(seconds))
 }
 
 fn to_window(bucket: &Bucket) -> WindowUsage {
@@ -175,19 +170,37 @@ pub fn parse_usage(raw: &Value) -> Result<UsageSnapshot, AppError> {
         .get("rate_limit")
         .and_then(Value::as_object)
         .ok_or_else(|| AppError::Parse("Codex rate_limit missing".to_string()))?;
-    let weekly = weekly_window(limits)
-        .ok_or_else(|| AppError::Parse("Codex weekly window missing".to_string()))?;
-    let weekly = weekly_bucket_from(weekly)?;
+    // Which windows exist depends on the plan: ChatGPT Plus reports the 5-hour session
+    // window alongside the weekly quota, while Pro reports the weekly window only. Treat
+    // both as optional and require just one, so neither plan loses its usage view.
+    let session = window_with(limits, SESSION_WINDOW_SECONDS)
+        .map(|window| bucket_from(window, SESSION_KEY, "Codex 5-hour"))
+        .transpose()?;
+    let weekly = window_with(limits, WEEKLY_WINDOW_SECONDS)
+        .map(|window| bucket_from(window, WEEKLY_KEY, "Codex weekly"))
+        .transpose()?;
+
+    // Shortest window first, so the headline pair reads session -> weekly like every other
+    // service. A weekly-only account keeps the weekly window as its headline.
+    let buckets: Vec<Bucket> = session.into_iter().chain(weekly).collect();
+    let primary = buckets
+        .first()
+        .ok_or_else(|| AppError::Parse("Codex usage windows missing".to_string()))?;
+
+    // `five_hour` is the legacy serialization slot for a service's first headline window.
+    // It carries the 5-hour session when the plan has one and the weekly quota otherwise.
+    let five_hour = Some(to_window(primary));
+    let primary_key = Some(primary.key.clone());
+    let weekly_primary = buckets.get(1).map(to_window);
+    let secondary_key = buckets.get(1).map(|bucket| bucket.key.clone());
 
     Ok(UsageSnapshot {
         service_id: crate::service::CODEX.to_string(),
-        // `five_hour` is the legacy serialization slot for a service's first headline
-        // window. It carries Codex's weekly quota here and does not imply a 5-hour session.
-        five_hour: Some(to_window(&weekly)),
-        weekly_primary: None,
-        primary_key: Some(weekly.key.clone()),
-        secondary_key: None,
-        buckets: vec![weekly],
+        five_hour,
+        weekly_primary,
+        primary_key,
+        secondary_key,
+        buckets,
         organization_name: "Codex".to_string(),
         account_email: String::new(),
         subscription: raw
@@ -671,9 +684,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selects_the_weekly_window_and_ignores_a_short_window() {
+    fn exposes_the_session_window_as_headline_and_weekly_as_secondary() {
         let snap = parse_usage(&json!({
-            "plan_type": "pro",
+            "plan_type": "plus",
             "rate_limit": {
                 "primary_window": {"used_percent": 34.6, "reset_at": 1_800_000_000, "limit_window_seconds": 18_000},
                 "secondary_window": {"used_percent": 75, "reset_at": 1_800_300_000, "limit_window_seconds": 604_800}
@@ -682,31 +695,66 @@ mod tests {
         .expect("valid Codex usage");
 
         assert_eq!(snap.service_id, crate::service::CODEX);
-        assert_eq!(snap.five_hour.as_ref().map(|w| w.remaining), Some(25));
-        assert!(snap.weekly_primary.is_none());
-        assert_eq!(snap.buckets.len(), 1);
-        assert_eq!(snap.buckets[0].key, "codex-weekly");
-        assert_eq!(snap.primary_key.as_deref(), Some("codex-weekly"));
-        assert!(snap.secondary_key.is_none());
-        assert_eq!(snap.subscription, "pro");
+        assert_eq!(snap.five_hour.as_ref().map(|w| w.remaining), Some(65));
+        assert_eq!(snap.weekly_primary.as_ref().map(|w| w.remaining), Some(25));
+        assert_eq!(snap.primary_key.as_deref(), Some("codex-5h"));
+        assert_eq!(snap.secondary_key.as_deref(), Some("codex-weekly"));
+        assert_eq!(snap.buckets.len(), 2);
+        assert_eq!(snap.buckets[0].key, "codex-5h");
+        assert_eq!(snap.buckets[1].key, "codex-weekly");
+        assert_eq!(snap.subscription, "plus");
         assert!(snap.buckets[0].resets_at.starts_with("2027-01-"));
     }
 
+    /// The window roles are not fixed: the weekly quota can arrive in `primary_window`. The
+    /// headline pair must still be ordered by duration, not by the slot the API used.
     #[test]
-    fn accepts_a_weekly_primary_window_without_secondary_window() {
+    fn orders_the_headline_pair_by_duration_not_slot_name() {
+        let snap = parse_usage(&json!({
+            "rate_limit": {
+                "primary_window": {"used_percent": 10, "reset_at": 1_800_300_000, "limit_window_seconds": 604_800},
+                "secondary_window": {"used_percent": 40, "reset_at": 1_800_000_000, "limit_window_seconds": 18_000}
+            }
+        }))
+        .expect("valid Codex usage");
+
+        assert_eq!(snap.primary_key.as_deref(), Some("codex-5h"));
+        assert_eq!(snap.five_hour.as_ref().map(|w| w.remaining), Some(60));
+        assert_eq!(snap.secondary_key.as_deref(), Some("codex-weekly"));
+        assert_eq!(snap.weekly_primary.as_ref().map(|w| w.remaining), Some(90));
+    }
+
+    /// ChatGPT Pro reports no 5-hour session window. Its weekly quota stays the headline
+    /// window so the widget, tray, and stats keep showing usage on that plan.
+    #[test]
+    fn accepts_a_weekly_only_plan_without_a_session_window() {
         let snap = parse_usage(&json!({
             "rate_limit": {"primary_window": {"used_percent": 0, "reset_at": 1_800_000_000, "limit_window_seconds": 604_800}}
         }))
-        .expect("weekly primary window is sufficient");
+        .expect("weekly window alone is sufficient");
 
+        assert_eq!(snap.five_hour.as_ref().map(|w| w.remaining), Some(100));
         assert!(snap.weekly_primary.is_none());
+        assert_eq!(snap.primary_key.as_deref(), Some("codex-weekly"));
         assert!(snap.secondary_key.is_none());
         assert_eq!(snap.buckets.len(), 1);
         assert_eq!(snap.buckets[0].key, "codex-weekly");
     }
 
     #[test]
-    fn rejects_missing_or_invalid_weekly_window() {
+    fn accepts_a_session_only_response() {
+        let snap = parse_usage(&json!({
+            "rate_limit": {"primary_window": {"used_percent": 20, "reset_at": 1_800_000_000, "limit_window_seconds": 18_000}}
+        }))
+        .expect("session window alone is sufficient");
+
+        assert_eq!(snap.primary_key.as_deref(), Some("codex-5h"));
+        assert!(snap.secondary_key.is_none());
+        assert_eq!(snap.buckets.len(), 1);
+    }
+
+    #[test]
+    fn rejects_missing_or_invalid_windows() {
         assert!(parse_usage(&json!({"rate_limit": {}})).is_err());
         assert!(parse_usage(&json!({"rate_limit": {"primary_window": {}}})).is_err());
         assert!(parse_usage(&json!({
@@ -721,8 +769,9 @@ mod tests {
             "rate_limit": {"primary_window": {"used_percent": 10, "reset_at": 1_800_000_000, "limit_window_seconds": 0}}
         }))
         .is_err());
+        // An unknown window duration is not silently treated as one of the two known windows.
         assert!(parse_usage(&json!({
-            "rate_limit": {"primary_window": {"used_percent": 10, "reset_at": 1_800_000_000, "limit_window_seconds": 18_000}}
+            "rate_limit": {"primary_window": {"used_percent": 10, "reset_at": 1_800_000_000, "limit_window_seconds": 3_600}}
         }))
         .is_err());
     }

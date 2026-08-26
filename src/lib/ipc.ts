@@ -171,13 +171,16 @@ function mockUsage(service?: string): UsageSnapshot {
     };
   }
   if (service === "codex") {
-    const buckets = [b("codex-weekly", "Codex weekly", 43, 4 * 86_400_000)];
+    const buckets = [
+      b("codex-5h", "Codex 5-hour", 61, 2 * 3600_000),
+      b("codex-weekly", "Codex weekly", 43, 4 * 86_400_000),
+    ];
     return {
       service_id: "codex",
-      five_hour: { remaining: 43, utilization: 57, resets_at: buckets[0].resets_at },
-      weekly_primary: null,
-      primary_key: "codex-weekly",
-      secondary_key: null,
+      five_hour: { remaining: 61, utilization: 39, resets_at: buckets[0].resets_at },
+      weekly_primary: { remaining: 43, utilization: 57, resets_at: buckets[1].resets_at },
+      primary_key: "codex-5h",
+      secondary_key: "codex-weekly",
       buckets,
       organization_name: "Codex",
       account_email: "",

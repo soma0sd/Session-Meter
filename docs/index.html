@@ -262,9 +262,10 @@
           <p>
             설정에서 <b>Codex 로그인</b>을 선택하면 앱 본체와 분리된 전용 창에서 ChatGPT 로그인 화면이 열립니다.
             로그인 창에 문제가 발생해도 트레이·설정·위젯은 계속 동작합니다. 로그인 후
-            `chatgpt.com` 세션을 비동기로 캡처하고 OAuth bearer로 검증해 저장한 뒤, Codex 구독의 주간 한도를 위젯·통계에 표시합니다.
-            `primary_window`와 `secondary_window` 중 `limit_window_seconds`가 `604800`인 창만 사용하며,
-            5시간 세션, OpenAI API 토큰 사용량·비용과 추가 모델별 한도는 표시하지 않습니다.
+            `chatgpt.com` 세션을 비동기로 캡처하고 OAuth bearer로 검증해 저장한 뒤, Codex 구독의 5시간 세션과 주간 한도를 위젯·통계에 표시합니다.
+            `primary_window`와 `secondary_window` 중 `limit_window_seconds`가 `18000`(5시간)·`604800`(주간)인 창을 사용하며,
+            5시간 세션 한도가 없는 요금제(예: ChatGPT Pro)에서는 주간 한도가 기본 창이 됩니다.
+            OpenAI API 토큰 사용량·비용과 추가 모델별 한도는 표시하지 않습니다.
           </p>
           <div class="note">
             Codex 사용량 조회는 비공개 `chatgpt.com` 엔드포인트에 의존합니다. 로그인 쿠키 또는 응답 구조가
