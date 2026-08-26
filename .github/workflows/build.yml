@@ -29,6 +29,42 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Release notes: lift this version's section out of both changelogs so the published
+      # release shows what actually changed. Falls back to the fixed line below when there is
+      # no tag (manual run) or the version has no changelog section yet.
+      - name: Compose release notes
+        id: notes
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          $version = $env:TAG_NAME -replace '^v', ''
+          function Get-ChangelogSection([string]$Path, [string]$Version) {
+            if (-not (Test-Path $Path)) { return '' }
+            $text = Get-Content -Path $Path -Raw
+            $escaped = [regex]::Escape($Version)
+            # "## [1.2.3] - date" heading, everything up to the next "## [" heading.
+            $match = [regex]::Match($text, "(?ms)^## \[$escaped\][^\r\n]*\r?\n(.*?)(?=^## \[|\z)")
+            if ($match.Success) { return $match.Groups[1].Value.Trim() }
+            return ''
+          }
+          $ko = Get-ChangelogSection -Path 'CHANGELOG.md' -Version $version
+          $en = Get-ChangelogSection -Path 'CHANGELOG.en.md' -Version $version
+          $sections = @()
+          if ($ko) { $sections += "## 변경 요약`n`n$ko`n`n전체 변경 이력: [CHANGELOG.md]($env:REPO_URL/blob/main/CHANGELOG.md)" }
+          if ($en) { $sections += "## What's Changed`n`n$en`n`nFull changelog: [CHANGELOG.en.md]($env:REPO_URL/blob/main/CHANGELOG.en.md)" }
+          if ($sections.Count -eq 0) {
+            Write-Host "::warning::No changelog section found for $version; keeping the default release body."
+            exit 0
+          }
+          $sections += "## 설치 / Install`n`n``SessionMeter_${version}_x64-setup.exe`` (Windows x64). 기존 설치본은 앱의 업데이트 알림에서 갱신할 수 있습니다."
+          $body = $sections -join "`n`n"
+          $delimiter = "NOTES_$([guid]::NewGuid().ToString('N'))"
+          # Add-Content (not Out-File) so no console-width wrapping can corrupt a long line.
+          Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Value "notes<<$delimiter`n$body`n$delimiter"
+
       - name: Build app + installer
         uses: tauri-apps/tauri-action@v0
         env:
@@ -51,4 +87,4 @@ jobs:
           # "Set as a pre-release" (promote to Latest) — the tag stays intact.
           releaseDraft: false
           prerelease: true
-          releaseBody: "See the changelog for details."
+          releaseBody: ${{ steps.notes.outputs.notes || 'See the changelog for details.' }}
