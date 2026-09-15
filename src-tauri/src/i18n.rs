@@ -25,10 +25,21 @@ pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
         ("ko", "seven_day") => "주간 세션".to_string(),
         ("ko", "codex-5h") => "Codex 5시간".to_string(),
         ("ko", "codex-weekly") => "Codex 주간".to_string(),
+        // Antigravity's four model-group buckets. Without these the desktop notification was
+        // the one place that still showed an English label (the API's own `displayName`, or
+        // `antigravity::humanize`); the widget and stats windows translate via src/lib/i18n.ts.
+        ("ko", "gemini-5h") => "Gemini 5시간".to_string(),
+        ("ko", "gemini-weekly") => "Gemini 주간".to_string(),
+        ("ko", "3p-5h") => "Claude/GPT 5시간".to_string(),
+        ("ko", "3p-weekly") => "Claude/GPT 주간".to_string(),
         ("en", "five_hour") => "Current session".to_string(),
         ("en", "seven_day") => "Weekly session".to_string(),
         ("en", "codex-5h") => "Codex 5-hour".to_string(),
         ("en", "codex-weekly") => "Codex weekly".to_string(),
+        ("en", "gemini-5h") => "Gemini 5-hour".to_string(),
+        ("en", "gemini-weekly") => "Gemini weekly".to_string(),
+        ("en", "3p-5h") => "Claude/GPT 5-hour".to_string(),
+        ("en", "3p-weekly") => "Claude/GPT weekly".to_string(),
         _ => fallback.to_string(),
     }
 }

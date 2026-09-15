@@ -35,7 +35,9 @@ pub fn is_docked(app: &AppHandle, service: &str) -> bool {
 
 /// The docked members that currently have a visible widget window, in `order`. Hidden or
 /// unknown ids are filtered out here so the row-major pack always re-flows around gaps.
-fn active_members(app: &AppHandle, cfg: &DockConfig) -> Vec<String> {
+/// `widget_size` reuses this as the set whose sizes get unified, so the two always agree on
+/// which widgets are actually in the grid.
+pub fn active_members(app: &AppHandle, cfg: &DockConfig) -> Vec<String> {
     cfg.order
         .iter()
         .filter(|&id| {

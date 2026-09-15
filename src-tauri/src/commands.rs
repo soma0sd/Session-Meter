@@ -444,6 +444,35 @@ pub fn set_move_lock(
     Ok(())
 }
 
+/// Switch which Antigravity model-group bucket pair the widget headline shows, from the widget
+/// itself. Mirrors `set_move_lock`: persist, then broadcast so an open Widget Style window
+/// follows along. Presentation only - the snapshot still carries all four buckets, and history
+/// and the tray stay pinned to the Gemini group (see `antigravity::parse_snapshot`).
+#[tauri::command]
+pub fn set_widget_headline_group(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    service: Option<String>,
+    group: String,
+) -> Result<(), String> {
+    // Rejected rather than normalized: any other value would build a bucket key (`{group}-5h`)
+    // that matches nothing, silently blanking the widget headline back to the Gemini fallback.
+    if group != "gemini" && group != "3p" {
+        return Err(format!("unknown headline group: {group}"));
+    }
+    let service = crate::service::normalize(service.as_deref());
+    let updated = {
+        let mut settings = state.settings.lock().unwrap();
+        let mut wc = settings.widget(&service);
+        wc.headline_group = group;
+        settings.widgets.insert(service.clone(), wc);
+        config::save(&app, &settings).map_err(|e| e.to_string())?;
+        settings.clone()
+    };
+    let _ = app.emit("settings://changed", &updated);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_widget_opacity(
     app: AppHandle,
@@ -496,6 +525,38 @@ pub fn set_widget_base_size(
     }
 }
 
+/// Report a widget's *natural* panel size (logical CSS px) - what it measures with the size
+/// unification minimum lifted. Kept apart from `set_widget_base_size` (the applied size, in
+/// physical px, that the dock grid stacks) so the unified maximum can never eat its own output
+/// and become a floor nothing can fall below. See `widget_size`.
+#[tauri::command]
+pub fn set_widget_natural_size(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    service: String,
+    width: i32,
+    height: i32,
+) {
+    if width < 40 || height < 30 {
+        return; // ignore a stray measurement taken before the panel has laid out
+    }
+    let service = crate::service::normalize(Some(&service));
+    let changed = {
+        let mut map = state.widget_natural_sizes.lock().unwrap();
+        map.insert(service, (width, height)) != Some((width, height))
+    };
+    if changed {
+        crate::widget_size::recompute(&app);
+    }
+}
+
+/// The size every docked widget currently grows to, in logical px (`0` for "no minimum").
+/// Pulled once when a widget mounts, since the broadcast only fires on change.
+#[tauri::command]
+pub fn get_widget_uniform_size(app: AppHandle) -> crate::widget_size::UniformSize {
+    crate::widget_size::current(&app)
+}
+
 /// Mark a widget's compact kebab popover as open or closed. Docking reads the last normal
 /// panel size while this flag is set, keeping neighboring widgets fixed in place.
 #[tauri::command]
@@ -511,6 +572,7 @@ pub fn set_widget_menu_open(app: AppHandle, state: State<'_, AppState>, service:
     }
     if !open {
         crate::dock::apply_layout(&app);
+        crate::widget_size::recompute(&app);
     }
 }
 
@@ -545,6 +607,9 @@ pub fn set_dock_config(
     if updated.dock.enabled {
         crate::dock::apply_layout(&app);
     }
+    // Outside the branch on purpose: turning docking *off* has to broadcast a zero uniform
+    // size so each widget drops back to hugging its own content.
+    crate::widget_size::recompute(&app);
     Ok(())
 }
 
@@ -568,6 +633,7 @@ pub fn dock_move_end(app: AppHandle) {
 #[tauri::command]
 pub fn dock_relayout(app: AppHandle) {
     crate::dock::apply_layout(&app);
+    crate::widget_size::recompute(&app);
 }
 
 // --- theme / locale ---

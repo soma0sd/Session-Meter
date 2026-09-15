@@ -37,6 +37,15 @@ pub struct AppState {
     /// Physical panel size reported by each widget while no popover is open. Docking uses this
     /// instead of the temporarily enlarged webview size of an open kebab popover.
     pub widget_base_sizes: Mutex<HashMap<String, (i32, i32)>>,
+    /// Each widget's *natural* panel size - what it measures with the uniform minimum lifted -
+    /// in **logical (CSS) px**. Deliberately separate from `widget_base_sizes` above, which is
+    /// the *applied* size in *physical* px because docking stacks physical rectangles. Mixing
+    /// the two silently scales everything by the display factor, so keep the units straight.
+    pub widget_natural_sizes: Mutex<HashMap<String, (i32, i32)>>,
+    /// Last `widget://uniform-size` payload that was broadcast, in logical px. Widgets report
+    /// their size whenever content ticks, so this keeps an unchanged recompute from leaking
+    /// out as an event.
+    pub widget_uniform_size: Mutex<(i32, i32)>,
     /// Widgets whose kebab popover is currently open. This is transient UI state only.
     pub widget_menus_open: Mutex<HashSet<String>>,
 }
@@ -56,6 +65,8 @@ impl AppState {
             update_available: Mutex::new(None),
             dock_relayout_in_progress: AtomicBool::new(false),
             widget_base_sizes: Mutex::new(HashMap::new()),
+            widget_natural_sizes: Mutex::new(HashMap::new()),
+            widget_uniform_size: Mutex::new((0, 0)),
             widget_menus_open: Mutex::new(HashSet::new()),
         }
     }

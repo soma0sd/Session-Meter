@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.2.0] - 2026-09-15
+
+### Added
+
+- **Antigravity model-group switch**: the Antigravity widget now has a switch below its readout
+  for moving between the Gemini and Claude/GPT model groups without opening the Widget Style
+  window. The choice is remembered and stays in sync with the window's headline group setting.
+- **Matching widget sizes**: with widget grid docking on, docked widgets are sized to match the
+  largest one among them, so the grid lines up. Widgets no longer end up at different widths
+  just because one service's labels are longer. Turning docking off returns each widget to the
+  size its own content needs.
+
+### Fixed
+
+- **Antigravity 5-hour alert threshold**: the Claude/GPT model group's 5-hour usage was judged
+  against the weekly threshold instead of the 5-hour session one. It now uses the session
+  threshold, so alerts fire as intended when the two are set to different values.
+- **Antigravity alert labels**: desktop notifications were the one place that still showed
+  Antigravity's quota names untranslated.
+
 ## [1.1.0] - 2026-08-26
 
 ### Added
