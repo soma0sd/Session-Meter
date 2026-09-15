@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format is based on
 - **Antigravity model-group switch**: the Antigravity widget now has a switch below its readout
   for moving between the Gemini and Claude/GPT model groups without opening the Widget Style
   window. The choice is remembered and stays in sync with the window's headline group setting.
+  Since the switch says which group is on screen, the widget's readout no longer repeats the
+  group name and simply reads "5-hour" and "Weekly". The stats window and notifications keep
+  the full names, where both groups appear side by side.
 - **Matching widget sizes**: with widget grid docking on, docked widgets are sized to match the
   largest one among them, so the grid lines up. Widgets no longer end up at different widths
   just because one service's labels are longer. Turning docking off returns each widget to the

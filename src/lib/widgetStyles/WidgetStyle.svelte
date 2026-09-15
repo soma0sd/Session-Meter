@@ -40,8 +40,20 @@
   const entry = $derived(catalogEntry(styleId));
   const Comp = $derived(components[entry.concept]);
 
+  // True when the caller picked a bucket pair itself, which today only the Antigravity widget
+  // and its style preview do. That widget carries its own model-group switch, so repeating the
+  // group in every readout ("Gemini 5-hour", "Gemini weekly", and again as the info-grid column
+  // headings) says nothing the switch has not already said.
+  const groupPicked = $derived(primaryKeyOverride !== null);
+
   function windowLabel(key: string | null | undefined, fallbackKey: string): string {
     const k = key ?? fallbackKey;
+    if (groupPicked) {
+      // Name just the window; the switch names the group. Falls through to the full label for
+      // an unrecognized key, so a future bucket is still labelled rather than mislabelled.
+      const short = $t(k.endsWith("-weekly") ? "bucket.window.weekly" : "bucket.window.5h");
+      if (k.endsWith("-weekly") || k.endsWith("-5h")) return short;
+    }
     const loc = $t("bucket." + k);
     if (!loc.startsWith("bucket.")) return loc;
     const b = snapshot.buckets.find((x) => x.key === k);
