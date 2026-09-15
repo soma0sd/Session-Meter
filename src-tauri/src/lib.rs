@@ -20,6 +20,7 @@ mod theme;
 mod tray;
 mod update;
 mod usage;
+mod widget_size;
 mod windows;
 
 use std::sync::atomic::Ordering;
@@ -202,9 +203,12 @@ pub fn run() {
             commands::get_effective_locale,
             commands::set_always_on_top,
             commands::set_move_lock,
+            commands::set_widget_headline_group,
             commands::set_widget_opacity,
             commands::set_widget_visible,
             commands::set_widget_base_size,
+            commands::set_widget_natural_size,
+            commands::get_widget_uniform_size,
             commands::set_widget_menu_open,
             commands::set_dock_config,
             commands::dock_move_to,

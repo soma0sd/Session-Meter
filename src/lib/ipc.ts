@@ -70,6 +70,15 @@ export interface DockConfig {
   anchor_y: number;
 }
 
+/** Panel size every docked widget grows to while grid docking is on, in **logical (CSS) px**
+ *  so it can be applied straight as a CSS minimum. `0` means "no minimum" - docking is off, or
+ *  no widget has reported a size yet. Note `setWidgetBaseSize` is *physical* px instead: that
+ *  one feeds the dock grid, which stacks physical rectangles. */
+export interface UniformSize {
+  width: number;
+  height: number;
+}
+
 /** Everything `setDockConfig` can change - deliberately excludes the anchor, which only
  *  `dockMoveTo` (a live group drag) may write. */
 export interface DockConfigPatch {
@@ -323,6 +332,12 @@ export const setWidgetBaseSize = (service: string, width: number, height: number
   call<void>("set_widget_base_size", { service, width, height }, () => undefined);
 export const setWidgetMenuOpen = (service: string, open: boolean) =>
   call<void>("set_widget_menu_open", { service, open }, () => undefined);
+export const setWidgetHeadlineGroup = (service: string, group: "gemini" | "3p") =>
+  call<void>("set_widget_headline_group", { service, group }, () => undefined);
+export const setWidgetNaturalSize = (service: string, width: number, height: number) =>
+  call<void>("set_widget_natural_size", { service, width, height }, () => undefined);
+export const getWidgetUniformSize = () =>
+  call<UniformSize>("get_widget_uniform_size", undefined, () => ({ width: 0, height: 0 }));
 
 // --- widget grid docking ---
 export const setDockConfig = (patch: DockConfigPatch) =>

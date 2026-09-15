@@ -371,6 +371,7 @@ pub fn apply_widget_visible(app: &AppHandle, service: &str, visible: bool) {
     // Hiding/showing a docked member changes who `pack()` sees, so the rest of the group
     // needs to re-flow around the gap (or make room again).
     crate::dock::apply_layout(app);
+    crate::widget_size::recompute(app);
 }
 
 /// Hide a dynamically-created service widget after its session is removed or expires. The
@@ -388,6 +389,7 @@ pub fn hide_runtime_widget(app: &AppHandle, service: &str) {
         let _ = win.hide();
     }
     crate::dock::apply_layout(app);
+    crate::widget_size::recompute(app);
 }
 
 /// Show each service's widget on startup, unless the user had it hidden.
@@ -408,6 +410,7 @@ pub fn show_widget(app: &AppHandle) {
         }
     }
     crate::dock::apply_layout(app);
+    crate::widget_size::recompute(app);
     // Re-push settings right after showing, in case a widget's own startup `getSettings()`
     // call raced ahead of `AppState` being managed (the static "widget" window's webview can
     // begin executing JS before `setup()` finishes) and so applied stale/default values. This
@@ -446,6 +449,7 @@ pub fn toggle_widget(app: &AppHandle) {
         }
     }
     crate::dock::apply_layout(app);
+    crate::widget_size::recompute(app);
 }
 
 /// Keep each service widget's actual state in sync with its desired visibility, recovering if
@@ -481,6 +485,7 @@ pub fn reconcile_widget_visibility(app: &AppHandle) {
         }
     }
     crate::dock::apply_layout(app);
+    crate::widget_size::recompute(app);
 }
 
 /// Position and show the custom context menu near the tray click point.

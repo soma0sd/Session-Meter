@@ -21,6 +21,9 @@
     dockRelayout,
     setWidgetBaseSize,
     setWidgetMenuOpen,
+    setWidgetHeadlineGroup,
+    setWidgetNaturalSize,
+    getWidgetUniformSize,
     type UsageSnapshot,
     type Settings,
     type UpdateInfo,
@@ -56,6 +59,12 @@
     return "claude";
   }
   const myService = (() => {
+    // Dev/preview override (widget.html?service=antigravity_ide), mirroring appinit's `?lang=`.
+    // Outside Tauri `getCurrentWindow()` throws and every widget would otherwise fall back to
+    // Claude, so the other services' widgets could not be previewed in the browser at all.
+    // A deployed window never carries a query string, so this cannot fire in the real app.
+    const override = new URLSearchParams(location.search).get("service");
+    if (override) return override;
     try {
       return serviceFromLabel(getCurrentWindow().label);
     } catch {
@@ -96,7 +105,15 @@
   let menuTopInset = $state(0);
   let bodyWidth = $state(0);
   // Show the icon row inline when the content is wide enough; otherwise collapse to a menu.
+  // Deliberately a function of the *body* width alone: it must not see the panel width, or the
+  // size unification below would feed back into it (see the `.body` comment in the styles).
   const collapsed = $derived(bodyWidth > 0 && bodyWidth < ICON_ROW_MIN);
+  // Size unification (widget_size.rs): while grid docking is on, every docked widget grows to
+  // the largest natural panel among them so the tiles line up. Logical (CSS) px; 0 = no minimum.
+  let uniformW = $state(0);
+  let uniformH = $state(0);
+  const uniformMinW = $derived(uniformW > 0 ? Math.min(MAX_W, uniformW) : 0);
+  const uniformMinH = $derived(uniformH > 0 ? uniformH : 0);
 
   let panelEl: HTMLElement | undefined;
   let menuEl = $state<HTMLElement | undefined>(undefined);
@@ -105,6 +122,7 @@
   let timer: number | undefined;
   let unlisteners: Array<() => void> = [];
   let reportedBaseSize: [number, number] | undefined;
+  let reportedNaturalSize: [number, number] | undefined;
   let reportedMenuOpen: boolean | undefined;
   let nativeTopInsetPx = 0;
   let fitRevision = 0;
@@ -158,6 +176,52 @@
     }
   }
 
+  // Measures the panel as it would be with no uniform minimum applied. The unified size is the
+  // maximum of every widget's *natural* size, so reporting an already-unified size back would
+  // make that maximum a floor it can never fall below again - hide or log out the widest widget
+  // and every other one stays stuck at its width forever.
+  //
+  // Clearing, measuring and restoring happen synchronously in one task, so the browser never
+  // paints the un-minimised panel and the panel's own ResizeObserver (which compares sizes at
+  // the end of the frame) sees no change and does not re-enter. Never put an `await` between
+  // these lines. Also note this relies on the global `box-sizing: border-box` (styles/theme.css):
+  // with content-box, feeding a measured width back in as `min-width` would add the padding
+  // again on every pass.
+  function measureNatural(): [number, number] {
+    const el = panelEl!;
+    const prevW = el.style.minWidth;
+    const prevH = el.style.minHeight;
+    el.style.minWidth = "0px";
+    el.style.minHeight = "0px";
+    try {
+      const r = el.getBoundingClientRect();
+      return [Math.ceil(r.width), Math.ceil(r.height)];
+    } finally {
+      el.style.minWidth = prevW;
+      el.style.minHeight = prevH;
+    }
+  }
+
+  // Logical (CSS) px, unlike `reportBaseSize` which converts to physical - see UniformSize.
+  async function reportNaturalSize(width: number, height: number) {
+    if (reportedNaturalSize?.[0] === width && reportedNaturalSize?.[1] === height) return;
+    try {
+      await setWidgetNaturalSize(myService, width, height);
+      reportedNaturalSize = [width, height];
+    } catch {
+      /* preview */
+    }
+  }
+
+  // The only writer of these two inline properties, because `measureNatural` clears and
+  // restores them within a single task: a second writer (a `style:` directive, say) could
+  // restore a stale value in between.
+  function applyUniform() {
+    if (!panelEl) return;
+    panelEl.style.minWidth = uniformMinW ? `${uniformMinW}px` : "";
+    panelEl.style.minHeight = uniformMinH ? `${uniformMinH}px` : "";
+  }
+
   async function reportMenuOpen(open: boolean) {
     if (reportedMenuOpen === open) return;
     try {
@@ -207,6 +271,10 @@
     if (!panelEl) return;
     const revision = ++fitRevision;
     if (bodyEl) bodyWidth = Math.ceil(bodyEl.getBoundingClientRect().width);
+    // Natural size first, then the applied one. Not awaited: adding an await point here would
+    // open a new race against `fitRevision`.
+    const [naturalW, naturalH] = measureNatural();
+    void reportNaturalSize(naturalW, naturalH);
     let r = panelEl.getBoundingClientRect();
     const panelW = Math.min(MAX_W, Math.ceil(r.width));
     const panelH = Math.ceil(r.height);
@@ -269,6 +337,14 @@
     style;
     menuOpen;
     collapsed;
+    // Switching the Antigravity headline group swaps the bucket labels, changing the body's
+    // width: refit on the state change itself rather than waiting for the body observer.
+    headlineGroup;
+    // Reading these is how the widget reacts to a `widget://uniform-size` broadcast.
+    uniformMinW;
+    uniformMinH;
+    // Must run before fitWindow, so the applied measurement already includes the minimum.
+    applyUniform();
     void fitWindow();
   });
 
@@ -299,6 +375,13 @@
     if (initialSnap !== undefined) snap = initialSnap;
     const initialSettings = await retryInvoke(() => getSettings());
     if (initialSettings !== undefined) applySettings(initialSettings);
+    // A window created after the size was last broadcast (a service logged in while the app
+    // runs) would otherwise never learn the size the other widgets are already using.
+    const initialUniform = await retryInvoke(() => getWidgetUniformSize());
+    if (initialUniform !== undefined) {
+      uniformW = initialUniform.width;
+      uniformH = initialUniform.height;
+    }
     try {
       updateInfo = await getUpdateState();
     } catch {
@@ -315,6 +398,12 @@
       );
       unlisteners.push(
         await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
+      );
+      unlisteners.push(
+        await listen<{ width: number; height: number }>("widget://uniform-size", (e) => {
+          uniformW = e.payload.width;
+          uniformH = e.payload.height;
+        }),
       );
       unlisteners.push(await getCurrentWindow().onScaleChanged(() => void fitWindow()));
       unlisteners.push(
@@ -353,6 +442,18 @@
     moveLocked = !moveLocked;
     try {
       await setMoveLock(myService, moveLocked);
+    } catch {
+      /* preview */
+    }
+  }
+
+  // Antigravity only: pick which model group the headline shows. Optimistic like the toggles
+  // above; the command re-broadcasts `settings://changed`, which re-applies the same value.
+  async function pickGroup(group: "gemini" | "3p") {
+    if (headlineGroup === group) return;
+    headlineGroup = group;
+    try {
+      await setWidgetHeadlineGroup(myService, group);
     } catch {
       /* preview */
     }
@@ -581,6 +682,27 @@
           {primaryKeyOverride}
           {secondaryKeyOverride} />
       </div>
+      {#if myService === "antigravity_ide"}
+        <!-- Antigravity reports two model groups; this swaps which pair the headline shows,
+             without opening the Widget Style window. Deliberately a sibling of `.body`, never
+             a child: `collapsed` is a pure function of `bodyWidth`, so a control inside the
+             body would feed its own width back into that judgement (see the `.body` comment
+             in the styles below). -->
+        <div class="seg" class:tight={collapsed} role="group" aria-label={$t("widgetStyle.headlineGroup")}>
+          <button
+            class="sbtn"
+            class:on={headlineGroup === "gemini"}
+            aria-pressed={headlineGroup === "gemini"}
+            title={$t("widgetStyle.groupGemini")}
+            onclick={() => pickGroup("gemini")}><span>{$t("widgetStyle.groupGemini")}</span></button>
+          <button
+            class="sbtn"
+            class:on={headlineGroup === "3p"}
+            aria-pressed={headlineGroup === "3p"}
+            title={$t("widgetStyle.groupThirdParty")}
+            onclick={() => pickGroup("3p")}><span>{$t("widgetStyle.groupThirdParty")}</span></button>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -746,8 +868,15 @@
        self-reinforcing wrong state that re-measuring more often (which is where the previous
        fix attempts focused) cannot fix, since every re-measurement just re-confirms the same
        stretched value. `align-self: flex-start` makes `.body` size to its own natural content
-       width regardless of the panel's current width, so the measurement is always genuine. */
+       width regardless of the panel's current width, so the measurement is always genuine.
+       Keep it. Size unification applies its minimum to `.panel` only, for the same reason:
+       a minimum on `.body` would re-open exactly this loop. */
     align-self: flex-start;
+    /* Absorbs the slack when size unification makes the panel taller than this widget needs,
+       centring the readout instead of leaving it pinned under the header. Main-axis only -
+       the cross axis stays `flex-start` above, so width measurement is unaffected. */
+    flex: 1 0 auto;
+    justify-content: center;
   }
   .empty {
     text-align: center;
@@ -755,5 +884,69 @@
     color: rgb(var(--fg-muted));
     padding: 12px 8px;
     white-space: nowrap;
+    /* Same reason as `.body`: centre the loading / signed-out / not-running message in a
+       panel that unification has made taller. */
+    flex: 1 0 auto;
+    display: grid;
+    place-items: center;
+  }
+  /* Antigravity's model-group switch. Two constraints:
+     1) It must never widen the widget. Every label is absolutely positioned, so none of them
+        contributes to `.panel`'s max-content width - the same property that stops `.menu` from
+        widening the panel (see the `visualRight` comment in fitWindow). All this row adds
+        intrinsically is its own padding, border and gap.
+     2) It stays a `.panel` child, never a `.body` child - see the `.body` comment above. */
+  .seg {
+    display: flex;
+    gap: 2px;
+    margin-top: 7px;
+    padding: 2px;
+    border: 1px solid rgb(var(--border));
+    border-radius: 8px;
+    background: rgb(var(--track) / 0.45);
+  }
+  .sbtn {
+    position: relative; /* containing block for the absolutely positioned label */
+    flex: 1 1 0;
+    min-width: 0;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgb(var(--fg-muted));
+    cursor: default;
+  }
+  .sbtn > span {
+    /* Absolute so the label never sets a floor under the widget's width; it is clipped with an
+       ellipsis instead, and the full text stays available as the button's `title`. */
+    position: absolute;
+    inset: 0;
+    padding: 0 4px;
+    line-height: 20px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .seg.tight .sbtn > span {
+    /* Narrow styles (the same threshold that collapses the icon row) get a tighter label so
+       "Claude/GPT" still fits instead of being clipped. Safe from the feedback loop `collapsed`
+       would otherwise imply: `.seg` sits outside `.body`, so it cannot influence `bodyWidth`,
+       which is the only input `collapsed` has. */
+    font-size: 0.58rem;
+    padding: 0 2px;
+    letter-spacing: -0.01em;
+  }
+  .sbtn:hover {
+    background: rgb(var(--accent) / 0.14);
+    color: rgb(var(--fg));
+  }
+  .sbtn.on {
+    /* Matches the Widget Style window's segmented control (`.tbtn.active`). */
+    background: rgb(var(--accent));
+    color: rgb(var(--on-accent));
   }
 </style>
