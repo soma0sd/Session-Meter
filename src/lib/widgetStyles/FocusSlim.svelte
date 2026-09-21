@@ -13,6 +13,7 @@
     secondaryResetMs,
     primaryLabel,
     secondaryLabel,
+    extra,
   }: WidgetStyleProps = $props();
 
   // The fill (and the number) follow the remaining/used toggle.
@@ -56,6 +57,9 @@
       {/if}
       <span class="reset">{formatClock(primaryResetMs)}</span>
     </div>
+    {#if extra}
+      <div class="extraRow">{@render extra()}</div>
+    {/if}
   </div>
 {/if}
 
@@ -139,5 +143,11 @@
     color: rgb(var(--fg-muted));
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+  /* Under the numbers, flush right like them. */
+  .extraRow {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 1px;
   }
 </style>

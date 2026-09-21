@@ -380,14 +380,16 @@
         <section id="widget">
           <h2>데스크톱 위젯</h2>
           <p>
-            위젯은 테두리가 없고 작업 표시줄에 나타나지 않는 떠 있는 창으로, 각 항목의 남은 사용량과
-            초기화까지 남은 시간을 보여 줍니다. 표시 내용에 맞춰 창 크기가 자동으로 맞춰지며, 로그인한
+            위젯은 테두리가 없는 떠 있는 창으로, 각 항목의 남은 사용량과 초기화까지 남은 시간을
+            보여 줍니다. 표시 내용에 맞춰 창 크기가 자동으로 맞춰지며, 로그인한
             <b>서비스마다 독립된 위젯 창</b>이 뜨고 제목표시줄에 서비스 이름이 표시됩니다.
+            <b>항상 위</b>가 켜져 있으면 작업 표시줄에 나타나지 않고, 끄면 일반 창처럼 작업 표시줄과
+            Alt+Tab 목록에 표시되어 다른 창에 가려져도 쉽게 다시 찾을 수 있습니다.
           </p>
           <p>
             컴팩트 위젯의 상단 더보기 메뉴는 위젯 패널 바로 아래에 붙어 열리며, 아래쪽 공간이 부족하면
-            위쪽으로 열립니다. 사용량 본문을 가리지 않고, 메뉴를 열거나 닫아도 본문과 도킹된 이웃
-            위젯의 위치는 바뀌지 않습니다.
+            위쪽으로 열립니다. 사용량 본문을 가리지 않고, 메뉴를 열거나 닫아도 본문의 위치는 바뀌지
+            않습니다.
           </p>
           <p>
             아래 두 지표 예시는 Claude 위젯 기준입니다. Codex 위젯은 `limit_window_seconds`가 `604800`인
@@ -436,35 +438,34 @@
           <h3>위젯 그리드 도킹</h3>
           <p>
             설정 창의 <b>위젯 스타일 → 배치</b> 탭에서 <b>위젯 그리드 도킹</b>을 켜면 로그인한 서비스의
-            위젯들이 격자로 맞붙어 하나처럼 움직입니다. 열 개수와 서비스 순서를 지정할 수 있고, 도킹된
-            위젯 중 하나를 드래그하면 그룹 전체가 함께 이동합니다. 앱을 실행한 뒤에 새로 로그인한
-            서비스의 위젯도 다음 갱신 주기에 자동으로 그룹에 합류합니다.
+            사용량이 <b>하나의 위젯 창 안에 격자로 배치</b>됩니다. 열 개수와 서비스 순서를 지정할 수
+            있고, 도킹 창은 창 하나로 드래그해 이동합니다. 앱을 실행한 뒤에 새로 로그인한 서비스도
+            다음 갱신 주기에 자동으로 도킹 창에 합류합니다.
           </p>
           <p>
-            도킹된 위젯은 <b>그중 가장 큰 위젯의 크기에 맞춰집니다</b>. 서비스마다 표시 문구 길이가
-            달라 위젯 폭이 제각각이던 것이 가지런히 정렬되며, 남는 공간에서는 사용량 표시가 가운데에
-            놓입니다. 도킹을 끄면 각 위젯이 다시 자기 내용에 맞는 크기로 돌아갑니다. 크기가 커지면서
-            그룹이 화면 밖으로 나가게 되는 경우에는 화면 안쪽으로 한 번 이동합니다.
+            도킹 창의 각 칸에는 서비스 이름과 아이콘이 표시되고, 위젯 스타일·표시 기준·Antigravity
+            모델군 스위치는 서비스별 설정을 그대로 따릅니다. 칸의 폭은 가장 넓은 칸에, 행의 높이는
+            가장 높은 칸에 자동으로 맞춰져 격자가 가지런히 정렬되며, 남는 공간에서는 사용량 표시가
+            가운데에 놓입니다. 도킹 창의 <b>투명도</b>와 <b>항상 위</b>는 배치 탭에서 따로 설정하고,
+            도킹 창에 포함된 서비스의 탭에서는 이 두 항목이 비활성화됩니다. 도킹을 끄면 각 서비스가
+            다시 자기 창으로 돌아갑니다.
           </p>
           <div class="render-inline">
-            <div style="display:flex; gap:2px;">
-              <div class="app-window" style="width:126px;flex:0 0 126px;">
-                <div class="titlebar" style="font-size:11px;padding:7px 10px;">Claude</div>
+            <div class="app-window" style="width:380px;">
+              <div class="titlebar" style="font-size:11px;padding:7px 10px;">SessionMeter</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);">
                 <div class="awsec" style="padding:10px;">
+                  <div class="aw-sub" style="font-weight:700;margin-bottom:4px;">Claude</div>
                   <div class="aw-value" style="font-size:16px;font-weight:700;color:rgb(217,119,87);">62%</div>
                   <div class="aw-sub">이번 세션</div>
                 </div>
-              </div>
-              <div class="app-window" style="width:126px;flex:0 0 126px;">
-                <div class="titlebar" style="font-size:11px;padding:7px 10px;">Gemini</div>
-                <div class="awsec" style="padding:10px;">
+                <div class="awsec" style="padding:10px;border-left:1px solid var(--border);">
+                  <div class="aw-sub" style="font-weight:700;margin-bottom:4px;">Gemini</div>
                   <div class="aw-value" style="font-size:16px;font-weight:700;color:rgb(66,133,244);">41%</div>
                   <div class="aw-sub">이번 세션</div>
                 </div>
-              </div>
-              <div class="app-window" style="width:126px;flex:0 0 126px;">
-                <div class="titlebar" style="font-size:11px;padding:7px 10px;">Antigravity</div>
-                <div class="awsec" style="padding:10px;">
+                <div class="awsec" style="padding:10px;border-left:1px solid var(--border);">
+                  <div class="aw-sub" style="font-weight:700;margin-bottom:4px;">Antigravity</div>
                   <div class="aw-value" style="font-size:16px;font-weight:700;color:rgb(45,212,167);">88%</div>
                   <div class="aw-sub">5시간</div>
                   <div style="display:flex;gap:2px;margin-top:8px;padding:2px;border:1px solid var(--border);border-radius:6px;">
@@ -476,8 +477,8 @@
             </div>
           </div>
           <p class="mockup-caption">
-            그리드 도킹으로 맞붙은 3개 서비스 위젯(예시 그림, 열 개수 3). 모델군 스위치가 붙어 가장 큰
-            Antigravity 위젯에 나머지 두 위젯의 크기가 맞춰진 모습입니다.
+            3개 서비스가 하나의 도킹 창에 격자로 배치된 모습(예시 그림, 열 개수 3). 모델군 스위치가
+            붙어 가장 높은 Antigravity 칸에 나머지 두 칸의 높이가 맞춰집니다.
           </p>
         </section>
 
@@ -577,7 +578,7 @@
                 <div class="aw-row">
                   <div>
                     <div class="aw-name">업데이트</div>
-                    <div class="aw-sub">현재 v1.2.0</div>
+                    <div class="aw-sub">현재 v1.3.0</div>
                   </div>
                   <button class="aw-btn" type="button">업데이트 확인</button>
                 </div>

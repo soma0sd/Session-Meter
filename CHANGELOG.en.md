@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.3.0] - 2026-09-21
+
+### Changed
+
+- **Docked widgets share one window**: widget grid docking no longer snaps several per-service
+  windows together. The docked services are now laid out as cells of a single widget window, so
+  the group moves as one window and its columns and rows line up on their own, with no separate
+  size-matching step. The docked window is titled SessionMeter, each cell carries its service's
+  name and icon, and the widget style, display mode, and Antigravity model-group switch still
+  follow each service's own settings. A docking group saved by the previous version keeps its
+  on-screen position.
+- **Settings for the docked window**: the Placement tab of the Widget Style window now sets the
+  docked window's opacity and "Always on top". On the tab of a service that is part of the docked
+  window those two controls are disabled, with a note saying where they live. The docked window's
+  "Always on top" and "Lock position" can also be toggled from the widget header.
+- **Widgets with "Always on top" off appear in the taskbar**: a widget window (the docked one
+  included) whose "Always on top" is off now behaves like an ordinary window, with a taskbar
+  button and an Alt+Tab entry, so it is easy to bring back when other windows cover it. Turning
+  "Always on top" back on removes it from the taskbar as before. This also fixes the saved
+  "Always on top" setting not being applied to the Claude widget at startup.
+- **Antigravity model-group switch in compact styles**: compact styles now show the switch as
+  two icon buttons (the Gemini sparkle and the Claude spark) tucked right under the percentage
+  readout, instead of a labelled row across the whole widget. Detailed styles keep the labelled
+  row; the full group names are available as the buttons' tooltips.
+- **On-screen correction respects the taskbar**: when a widget or the docked window is moved
+  back inside the screen, the target is now the work area (the screen minus the taskbar), so a
+  window that is not always on top no longer ends up with its bottom under the taskbar. The
+  correction also runs right after a window grows to fit new content.
+
 ## [1.2.0] - 2026-09-15
 
 ### Added

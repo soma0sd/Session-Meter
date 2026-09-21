@@ -154,7 +154,7 @@ pub fn start(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
             poll_once(&app).await;
-            // Re-assert the widget's desired visibility (recovers a window that drifted
+            // Re-assert the widgets' desired visibility (recovers a window that drifted
             // off-screen or got hidden). Window ops run on the main thread.
             let a = app.clone();
             let _ = app.run_on_main_thread(move || crate::windows::reconcile_widget_visibility(&a));
@@ -162,10 +162,6 @@ pub fn start(app: &AppHandle) {
             loop {
                 tokio::time::sleep(Duration::from_secs(CHECK_STEP_SECS)).await;
                 waited += CHECK_STEP_SECS;
-                // Correct any dock drift every CHECK_STEP_SECS, independent of the (possibly
-                // much longer) usage refresh interval, so a docked group snaps back quickly.
-                let a = app.clone();
-                let _ = app.run_on_main_thread(move || crate::dock::watchdog_tick(&a));
                 if waited >= interval_secs(&app) {
                     break;
                 }

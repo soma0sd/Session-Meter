@@ -59,32 +59,31 @@ export interface WidgetConfig {
   headline_group: "gemini" | "3p";
 }
 
-/** Widget grid docking: several widgets snapped into a grid that move together. See the
- *  Widget Style window's Placement tab. */
+/** Widget docking: the docked services are drawn as cells of one shared window, laid out in
+ *  a grid, so they move together. See the Widget Style window's Placement tab. The group
+ *  window has window-level settings of its own (opacity, always-on-top, move lock), since the
+ *  per-service ones only apply to a service's own window. */
 export interface DockConfig {
   enabled: boolean;
   columns: number;
   /** Service ids in row-major placement order. */
   order: string[];
+  opacity: number;
+  always_on_top: boolean;
+  move_lock: boolean;
   anchor_x: number;
   anchor_y: number;
 }
 
-/** Panel size every docked widget grows to while grid docking is on, in **logical (CSS) px**
- *  so it can be applied straight as a CSS minimum. `0` means "no minimum" - docking is off, or
- *  no widget has reported a size yet. Note `setWidgetBaseSize` is *physical* px instead: that
- *  one feeds the dock grid, which stacks physical rectangles. */
-export interface UniformSize {
-  width: number;
-  height: number;
-}
-
-/** Everything `setDockConfig` can change - deliberately excludes the anchor, which only
- *  `dockMoveTo` (a live group drag) may write. */
+/** Everything `setDockConfig` can change - deliberately excludes the anchor (the docked
+ *  window's position), which only the window being dragged may write. */
 export interface DockConfigPatch {
   enabled: boolean;
   columns: number;
   order: string[];
+  opacity: number;
+  always_on_top: boolean;
+  move_lock: boolean;
 }
 
 export interface Settings {
@@ -100,19 +99,22 @@ export interface Settings {
   dock: DockConfig;
 }
 
+/** The defaults Rust applies to a service with no saved widget config (`WidgetConfig::default`). */
+export function defaultWidgetConfig(): WidgetConfig {
+  return {
+    style: "focus-slim-detailed",
+    display_mode: "remaining",
+    opacity: 0.9,
+    always_on_top: true,
+    move_lock: false,
+    visible: true,
+    headline_group: "gemini",
+  };
+}
+
 /** WidgetConfig with defaults applied for a service missing from the map. */
 export function widgetConfig(s: Settings, service: string): WidgetConfig {
-  return (
-    s.widgets?.[service] ?? {
-      style: "focus-slim-detailed",
-      display_mode: "remaining",
-      opacity: 0.9,
-      always_on_top: true,
-      move_lock: false,
-      visible: true,
-      headline_group: "gemini",
-    }
-  );
+  return s.widgets?.[service] ?? defaultWidgetConfig();
 }
 
 export interface SessionStatus {
@@ -239,26 +241,34 @@ function mockUsage(service?: string): UsageSnapshot {
   };
 }
 function mockSettings(): Settings {
+  // Browser preview only: `?style=<catalog id>` picks the widget style for every service, so
+  // each style can be looked at in the widget page (widget.html?service=...&style=...).
+  const style = new URLSearchParams(location.search).get("style") || "focus-slim-detailed";
+  const widget = (): WidgetConfig => ({ ...defaultWidgetConfig(), style });
   return {
     theme: "system",
     language: "auto",
     refresh_interval_min: 5,
     widgets: {
-      claude: {
-        style: "focus-slim-detailed",
-        display_mode: "remaining",
-        opacity: 0.9,
-        always_on_top: true,
-        move_lock: false,
-        visible: true,
-        headline_group: "gemini",
-      },
+      claude: widget(),
+      codex: widget(),
+      gemini: widget(),
+      antigravity_ide: widget(),
     },
     notify: { enabled: true, session_threshold: 80, weekly_threshold: 80, on_reset: true },
     history_retention_days: 30,
     org_name: "Preview Org",
     account_email: "you@example.com",
-    dock: { enabled: false, columns: 2, order: [], anchor_x: 0, anchor_y: 0 },
+    dock: {
+      enabled: false,
+      columns: 2,
+      order: [],
+      opacity: 0.9,
+      always_on_top: true,
+      move_lock: false,
+      anchor_x: 0,
+      anchor_y: 0,
+    },
   };
 }
 function mockHistory(): HistoryPoint[] {
@@ -328,24 +338,20 @@ export const setWidgetOpacity = (service: string, alpha: number) =>
   call<void>("set_widget_opacity", { service, alpha }, () => undefined);
 export const setWidgetVisible = (service: string, visible: boolean) =>
   call<void>("set_widget_visible", { service, visible }, () => undefined);
-export const setWidgetBaseSize = (service: string, width: number, height: number) =>
-  call<void>("set_widget_base_size", { service, width, height }, () => undefined);
-export const setWidgetMenuOpen = (service: string, open: boolean) =>
-  call<void>("set_widget_menu_open", { service, open }, () => undefined);
 export const setWidgetHeadlineGroup = (service: string, group: "gemini" | "3p") =>
   call<void>("set_widget_headline_group", { service, group }, () => undefined);
-export const setWidgetNaturalSize = (service: string, width: number, height: number) =>
-  call<void>("set_widget_natural_size", { service, width, height }, () => undefined);
-export const getWidgetUniformSize = () =>
-  call<UniformSize>("get_widget_uniform_size", undefined, () => ({ width: 0, height: 0 }));
 
-// --- widget grid docking ---
+// --- widget docking ---
 export const setDockConfig = (patch: DockConfigPatch) =>
   call<void>("set_dock_config", { patch }, () => undefined);
-export const dockMoveTo = (service: string, x: number, y: number) =>
-  call<void>("dock_move_to", { service, x, y }, () => undefined);
-export const dockMoveEnd = () => call<void>("dock_move_end", undefined, () => undefined);
-export const dockRelayout = () => call<void>("dock_relayout", undefined, () => undefined);
+export const setDockAlwaysOnTop = (on: boolean) =>
+  call<void>("set_dock_always_on_top", { on }, () => undefined);
+export const setDockMoveLock = (locked: boolean) =>
+  call<void>("set_dock_move_lock", { locked }, () => undefined);
+/** The services the docked window shows right now, in placement order. In the browser preview
+ *  (`widget.html?mode=dock`) this is a fixed sample so the grid can be looked at. */
+export const getDockMembers = () =>
+  call<string[]>("get_dock_members", undefined, () => ["claude", "codex", "antigravity_ide"]);
 
 // --- system ---
 export const setAutostart = (enabled: boolean) =>

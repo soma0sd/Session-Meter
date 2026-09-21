@@ -33,7 +33,16 @@
     history_retention_days: 30,
     org_name: "",
     account_email: "",
-    dock: { enabled: false, columns: 2, order: [], anchor_x: 0, anchor_y: 0 },
+    dock: {
+      enabled: false,
+      columns: 2,
+      order: [],
+      opacity: 0.9,
+      always_on_top: true,
+      move_lock: false,
+      anchor_x: 0,
+      anchor_y: 0,
+    },
   };
 
   let s = $state<Settings>(structuredClone(DEFAULTS));

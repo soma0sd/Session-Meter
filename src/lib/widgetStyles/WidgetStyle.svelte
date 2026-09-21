@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { t } from "../i18n";
   import type { UsageSnapshot } from "../ipc";
   import { catalogEntry, type DisplayMode } from "./types";
@@ -17,6 +18,7 @@
     displayMode,
     primaryKeyOverride = null,
     secondaryKeyOverride = null,
+    extra = undefined,
   }: {
     styleId: string;
     snapshot: UsageSnapshot;
@@ -27,6 +29,8 @@
      *  behavior unchanged. */
     primaryKeyOverride?: string | null;
     secondaryKeyOverride?: string | null;
+    /** Compact variants only: rendered under the percentage readout (see `WidgetStyleProps`). */
+    extra?: Snippet;
   } = $props();
 
   const components = {
@@ -92,4 +96,5 @@
   {primaryResetMs}
   {secondaryResetMs}
   {primaryLabel}
-  {secondaryLabel} />
+  {secondaryLabel}
+  {extra} />

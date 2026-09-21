@@ -2,6 +2,8 @@
 // concepts in a detailed or compact variant (10 total). The same components render both the
 // live desktop widget and the style-window preview, so they take pure data props.
 
+import type { Snippet } from "svelte";
+
 export type WidgetVariant = "detailed" | "compact";
 export type DisplayMode = "remaining" | "used";
 
@@ -20,6 +22,11 @@ export interface WidgetStyleProps {
   secondaryResetMs: number;
   primaryLabel: string;
   secondaryLabel: string;
+  /** Compact variants only: rendered directly under the percentage readout. The Antigravity
+   *  widget passes its model-group switch here (as icon buttons), so the switch sits with the
+   *  numbers it changes instead of taking a row of its own under the whole readout. Detailed
+   *  variants ignore it. */
+  extra?: Snippet;
 }
 
 export interface StyleCatalogEntry {

@@ -82,7 +82,9 @@ const en: Dict = {
   "dock.enable": "Dock widgets together",
   "dock.columns": "Columns",
   "dock.order": "Order",
-  "dock.hint": "Drag any docked widget and the whole group moves together.",
+  "dock.hint": "Docked widgets are combined into one window, laid out in a grid, and move together. Turning off \"Always on top\" shows the window in the taskbar.",
+  "dock.memberNote": "This widget is part of the docked window. Its opacity and \"Always on top\" are set in the Placement tab.",
+  "widget.taskbarHint": "When \"Always on top\" is off, the widget appears in the taskbar.",
 
   "settings.title": "Settings",
   "settings.section.general": "General",
@@ -217,7 +219,9 @@ const ko: Dict = {
   "dock.enable": "위젯 그리드 도킹",
   "dock.columns": "열 개수",
   "dock.order": "순서",
-  "dock.hint": "도킹된 위젯 중 하나를 드래그하면 전체가 함께 이동합니다.",
+  "dock.hint": "도킹된 위젯은 하나의 창 안에 격자로 배치되어 함께 이동합니다. \"항상 위\"를 끄면 창이 작업 표시줄에 표시됩니다.",
+  "dock.memberNote": "이 위젯은 도킹 창에 포함되어 있습니다. 투명도와 \"항상 위\"는 배치 탭에서 설정합니다.",
+  "widget.taskbarHint": "\"항상 위\"를 끄면 위젯이 작업 표시줄에 표시됩니다.",
 
   "settings.title": "설정",
   "settings.section.general": "일반",
