@@ -8,37 +8,38 @@
   import {
     getUsage,
     getSettings,
+    getDockMembers,
     openSettingsWindow,
     openStatsWindow,
     openStyleWindow,
     setAlwaysOnTop,
     setMoveLock,
+    setDockAlwaysOnTop,
+    setDockMoveLock,
+    setWidgetHeadlineGroup,
     getUpdateState,
     installUpdate,
     widgetConfig,
-    dockMoveTo,
-    dockMoveEnd,
-    dockRelayout,
-    setWidgetBaseSize,
-    setWidgetMenuOpen,
-    setWidgetHeadlineGroup,
-    setWidgetNaturalSize,
-    getWidgetUniformSize,
+    defaultWidgetConfig,
     type UsageSnapshot,
     type Settings,
     type UpdateInfo,
+    type WidgetConfig,
   } from "../lib/ipc";
-  import WidgetStyle from "../lib/widgetStyles/WidgetStyle.svelte";
-  import { DEFAULT_STYLE, colorsFor, serviceIcons } from "../lib/widgetStyles/types";
+  import ServiceCell from "./ServiceCell.svelte";
+  import { colorsFor, serviceIcons } from "../lib/widgetStyles/types";
 
-  // The window is sized to the panel content; this caps how wide a long label can push it.
-  const MAX_W = 360;
+  // The window is sized to the panel content; this caps how wide a long label can push one
+  // service's cell. The docked window allows this much per column.
+  const MAX_CELL_W = 360;
   // Below this content width, the tool icons are collapsed into a kebab dropdown so they
   // don't force the widget wider than its content.
   const ICON_ROW_MIN = 208;
   // Gap between the panel and the kebab popover, which is anchored fully outside the panel so
   // opening it never covers the usage readout the widget exists to show.
   const MENU_GAP = 4;
+  // Label of the docked group window (`windows::DOCK_LABEL` on the Rust side).
+  const DOCK_LABEL = "widget-dock";
 
   const SERVICE_NAMES: Record<string, string> = {
     claude: "Claude",
@@ -47,10 +48,6 @@
     antigravity_ide: "Antigravity",
   };
 
-  // Small brand marks shown before the service name in the widget title, tinted with the
-  // service's metric colour (--m1). Shared with Style.svelte's Placement tab - see types.ts.
-  const SERVICE_ICONS = serviceIcons;
-
   // Which service this widget window monitors, derived from its window label
   // ("widget" == claude, "widget-{service}" otherwise).
   function serviceFromLabel(label: string): string {
@@ -58,20 +55,27 @@
     if (label.startsWith("widget-")) return label.slice("widget-".length);
     return "claude";
   }
-  const myService = (() => {
-    // Dev/preview override (widget.html?service=antigravity_ide), mirroring appinit's `?lang=`.
-    // Outside Tauri `getCurrentWindow()` throws and every widget would otherwise fall back to
-    // Claude, so the other services' widgets could not be previewed in the browser at all.
-    // A deployed window never carries a query string, so this cannot fire in the real app.
-    const override = new URLSearchParams(location.search).get("service");
-    if (override) return override;
+
+  // Dev/preview overrides (widget.html?service=antigravity_ide, widget.html?mode=dock), mirroring
+  // appinit's `?lang=`. Outside Tauri `getCurrentWindow()` throws and every widget would
+  // otherwise fall back to Claude, so neither the other services' widgets nor the docked window
+  // could be previewed in the browser at all. A deployed window never carries a query string, so
+  // this cannot fire in the real app.
+  const params = new URLSearchParams(location.search);
+  const windowLabel = (() => {
     try {
-      return serviceFromLabel(getCurrentWindow().label);
+      return getCurrentWindow().label;
     } catch {
-      return "claude";
+      return "";
     }
   })();
+  // Group mode: this is the docked window, which hosts every docked service as a cell of one
+  // grid (see dock.rs). Otherwise this window shows exactly one service.
+  const isGroup = params.get("mode") === "dock" || windowLabel === DOCK_LABEL;
+  const myService = isGroup ? "" : (params.get("service") ?? serviceFromLabel(windowLabel));
   const serviceName = SERVICE_NAMES[myService] ?? myService;
+  const serviceIcon = isGroup ? "" : (serviceIcons[myService] ?? "");
+  const serviceColors = isGroup ? null : colorsFor(myService);
 
   const KEBAB = `<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><circle cx="8" cy="3.4" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="8" cy="12.6" r="1.35"/></svg>`;
   const PIN = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h6M9.2 2.5v4.7l2.3 2.8H4.5L6.8 7.2V2.5M8 10v3.5"/></svg>`;
@@ -82,63 +86,75 @@
   const UPDATE = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.4v7.4M5.2 7l2.8 2.9L10.8 7M3.4 13.2h9.2"/></svg>`;
   const PALETTE = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8a6.2 6.2 0 1 0 0 12.4c1 0 1.5-.8 1.5-1.5 0-.9-.8-1.3-.8-2 0-.6.5-1 1.1-1h1.3A2.8 2.8 0 0 0 14.2 7 6.3 6.3 0 0 0 8 1.8Z"/><circle cx="5.4" cy="6.2" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="4.9" r=".9" fill="currentColor" stroke="none"/><circle cx="10.6" cy="6.2" r=".9" fill="currentColor" stroke="none"/></svg>`;
 
-  let snap = $state<UsageSnapshot | null>(null);
-  let alwaysOnTop = $state(true);
-  let moveLocked = $state(false);
-  let displayMode = $state<"remaining" | "used">("remaining");
-  let style = $state<string>(DEFAULT_STYLE);
-  let now = $state(Date.now());
-  // Widget grid docking: whether this widget currently belongs to an enabled docked group.
-  let dockEnabled = $state(false);
-  let dockOrder = $state<string[]>([]);
-  const amIDocked = $derived(dockEnabled && dockOrder.includes(myService));
-  // Antigravity-only: which model-group bucket pair (gemini | 3p) the headline shows.
-  let headlineGroup = $state<"gemini" | "3p">("gemini");
-  const primaryKeyOverride = $derived(myService === "antigravity_ide" ? `${headlineGroup}-5h` : null);
-  const secondaryKeyOverride = $derived(
-    myService === "antigravity_ide" ? `${headlineGroup}-weekly` : null,
+  let settings = $state<Settings | null>(null);
+  // Latest snapshot per service. A single-service window only ever fills its own entry; the
+  // docked window keeps one per member.
+  let snaps = $state<Record<string, UsageSnapshot | null>>({});
+  // Docked window only: the services it shows, in placement order (Rust decides - see
+  // `dock::sync` - so the window and the OS-level show/hide always agree).
+  let members = $state<string[]>([]);
+  const cells = $derived(isGroup ? members : [myService]);
+  const columns = $derived(
+    isGroup ? Math.max(1, Math.min(settings?.dock.columns ?? 1, Math.max(1, cells.length))) : 1,
   );
+  const maxW = $derived(MAX_CELL_W * columns);
+  // The window-level toggles come from the docked group's own config in group mode, and from
+  // the service's widget config otherwise.
+  const alwaysOnTop = $derived(
+    settings === null
+      ? true
+      : isGroup
+        ? settings.dock.always_on_top
+        : widgetConfig(settings, myService).always_on_top,
+  );
+  const moveLocked = $derived(
+    settings === null
+      ? false
+      : isGroup
+        ? settings.dock.move_lock
+        : widgetConfig(settings, myService).move_lock,
+  );
+  const opacity = $derived(
+    settings === null
+      ? 0.9
+      : isGroup
+        ? settings.dock.opacity
+        : widgetConfig(settings, myService).opacity,
+  );
+  let now = $state(Date.now());
   let updateInfo = $state<UpdateInfo | null>(null);
   let updating = $state(false);
   let menuOpen = $state(false);
   let menuOpensUp = $state(false);
   let menuTopInset = $state(0);
-  let bodyWidth = $state(0);
+  let contentWidth = $state(0);
   // Show the icon row inline when the content is wide enough; otherwise collapse to a menu.
-  // Deliberately a function of the *body* width alone: it must not see the panel width, or the
-  // size unification below would feed back into it (see the `.body` comment in the styles).
-  const collapsed = $derived(bodyWidth > 0 && bodyWidth < ICON_ROW_MIN);
-  // Size unification (widget_size.rs): while grid docking is on, every docked widget grows to
-  // the largest natural panel among them so the tiles line up. Logical (CSS) px; 0 = no minimum.
-  let uniformW = $state(0);
-  let uniformH = $state(0);
-  const uniformMinW = $derived(uniformW > 0 ? Math.min(MAX_W, uniformW) : 0);
-  const uniformMinH = $derived(uniformH > 0 ? uniformH : 0);
+  // Deliberately a function of the *content* width alone: it must not see the panel width, or
+  // the header's own width would feed back into the judgement (see `.content` in the styles).
+  const collapsed = $derived(contentWidth > 0 && contentWidth < ICON_ROW_MIN);
 
   let panelEl: HTMLElement | undefined;
   let menuEl = $state<HTMLElement | undefined>(undefined);
-  let bodyEl = $state<HTMLElement | undefined>(undefined);
+  let contentEl: HTMLElement | undefined;
   let ro: ResizeObserver | undefined;
+  let contentRo: ResizeObserver | undefined;
   let timer: number | undefined;
   let unlisteners: Array<() => void> = [];
-  let reportedBaseSize: [number, number] | undefined;
-  let reportedNaturalSize: [number, number] | undefined;
-  let reportedMenuOpen: boolean | undefined;
   let nativeTopInsetPx = 0;
   let fitRevision = 0;
 
-  function applySettings(s: Settings) {
-    const wc = widgetConfig(s, myService);
-    alwaysOnTop = wc.always_on_top;
-    moveLocked = wc.move_lock;
-    displayMode = wc.display_mode;
-    style = wc.style || DEFAULT_STYLE;
-    headlineGroup = wc.headline_group === "3p" ? "3p" : "gemini";
-    dockEnabled = s.dock?.enabled ?? false;
-    dockOrder = s.dock?.order ?? [];
-    applyTheme(s.theme as Theme);
-    document.documentElement.style.setProperty("--panel-alpha", String(wc.opacity));
+  function cellConfig(service: string): WidgetConfig {
+    return settings ? widgetConfig(settings, service) : defaultWidgetConfig();
   }
+
+  function applySettings(s: Settings) {
+    settings = s;
+    applyTheme(s.theme as Theme);
+  }
+
+  $effect(() => {
+    document.documentElement.style.setProperty("--panel-alpha", String(opacity));
+  });
 
   // The static "widget" (Claude) window is created by Tauri's builder before `setup()` runs,
   // so its webview can start executing JS before Rust has finished loading settings and
@@ -147,10 +163,10 @@
   // everything else `applySettings` sets) stuck at its compile-time default forever. A few
   // quick retries cover that narrow startup window; when the first call already succeeds (the
   // overwhelmingly common case, and always the case for a dynamically-created window like
-  // Gemini/Antigravity, which only ever gets created after setup() finishes), this resolves
-  // on the first attempt with no extra cost. Only retries on a thrown error - a call that
-  // succeeds with a legitimate "nothing yet" value (e.g. `getUsage` returning null) is not
-  // retried, since that's a normal state, not a failure.
+  // Gemini/Antigravity or the docked one, which only ever get created after setup() finishes),
+  // this resolves on the first attempt with no extra cost. Only retries on a thrown error - a
+  // call that succeeds with a legitimate "nothing yet" value (e.g. `getUsage` returning null) is
+  // not retried, since that's a normal state, not a failure.
   async function retryInvoke<T>(fn: () => Promise<T>, attempts = 5, delayMs = 150): Promise<T | undefined> {
     for (let i = 0; i < attempts; i++) {
       try {
@@ -162,73 +178,13 @@
     return undefined;
   }
 
-  async function reportBaseSize(width: number, height: number) {
-    const physical: [number, number] = [
-      Math.round(width * (window.devicePixelRatio || 1)),
-      Math.round(height * (window.devicePixelRatio || 1)),
-    ];
-    if (reportedBaseSize?.[0] === physical[0] && reportedBaseSize?.[1] === physical[1]) return;
-    try {
-      await setWidgetBaseSize(myService, physical[0], physical[1]);
-      reportedBaseSize = physical;
-    } catch {
-      /* preview */
-    }
-  }
-
-  // Measures the panel as it would be with no uniform minimum applied. The unified size is the
-  // maximum of every widget's *natural* size, so reporting an already-unified size back would
-  // make that maximum a floor it can never fall below again - hide or log out the widest widget
-  // and every other one stays stuck at its width forever.
-  //
-  // Clearing, measuring and restoring happen synchronously in one task, so the browser never
-  // paints the un-minimised panel and the panel's own ResizeObserver (which compares sizes at
-  // the end of the frame) sees no change and does not re-enter. Never put an `await` between
-  // these lines. Also note this relies on the global `box-sizing: border-box` (styles/theme.css):
-  // with content-box, feeding a measured width back in as `min-width` would add the padding
-  // again on every pass.
-  function measureNatural(): [number, number] {
-    const el = panelEl!;
-    const prevW = el.style.minWidth;
-    const prevH = el.style.minHeight;
-    el.style.minWidth = "0px";
-    el.style.minHeight = "0px";
-    try {
-      const r = el.getBoundingClientRect();
-      return [Math.ceil(r.width), Math.ceil(r.height)];
-    } finally {
-      el.style.minWidth = prevW;
-      el.style.minHeight = prevH;
-    }
-  }
-
-  // Logical (CSS) px, unlike `reportBaseSize` which converts to physical - see UniformSize.
-  async function reportNaturalSize(width: number, height: number) {
-    if (reportedNaturalSize?.[0] === width && reportedNaturalSize?.[1] === height) return;
-    try {
-      await setWidgetNaturalSize(myService, width, height);
-      reportedNaturalSize = [width, height];
-    } catch {
-      /* preview */
-    }
-  }
-
-  // The only writer of these two inline properties, because `measureNatural` clears and
-  // restores them within a single task: a second writer (a `style:` directive, say) could
-  // restore a stale value in between.
-  function applyUniform() {
-    if (!panelEl) return;
-    panelEl.style.minWidth = uniformMinW ? `${uniformMinW}px` : "";
-    panelEl.style.minHeight = uniformMinH ? `${uniformMinH}px` : "";
-  }
-
-  async function reportMenuOpen(open: boolean) {
-    if (reportedMenuOpen === open) return;
-    try {
-      await setWidgetMenuOpen(myService, open);
-      reportedMenuOpen = open;
-    } catch {
-      /* preview */
+  // Pull the cached snapshot of every listed service this window has not seen yet (a member
+  // that just joined the docked window, say). Later updates arrive over `usage://updated`.
+  async function loadSnaps(list: string[]) {
+    for (const svc of list) {
+      if (svc in snaps) continue;
+      const s = await retryInvoke(() => getUsage(svc));
+      if (s !== undefined) snaps = { ...snaps, [svc]: s };
     }
   }
 
@@ -270,17 +226,11 @@
   async function fitWindow() {
     if (!panelEl) return;
     const revision = ++fitRevision;
-    if (bodyEl) bodyWidth = Math.ceil(bodyEl.getBoundingClientRect().width);
-    // Natural size first, then the applied one. Not awaited: adding an await point here would
-    // open a new race against `fitRevision`.
-    const [naturalW, naturalH] = measureNatural();
-    void reportNaturalSize(naturalW, naturalH);
+    if (contentEl) contentWidth = Math.ceil(contentEl.getBoundingClientRect().width);
     let r = panelEl.getBoundingClientRect();
-    const panelW = Math.min(MAX_W, Math.ceil(r.width));
+    const panelW = Math.min(maxW, Math.ceil(r.width));
     const panelH = Math.ceil(r.height);
     if (panelW < 40 || panelH < 30) return;
-    await reportBaseSize(panelW, panelH);
-    if (revision !== fitRevision) return;
 
     const shouldOpenUp = menuOpen && (await preferUpwardMenu(panelH));
     if (revision !== fitRevision) return;
@@ -307,21 +257,13 @@
     // the window has to widen for it too - otherwise the menu text is cut off at the window
     // edge. The panel itself is `width: max-content`, so the extra width stays transparent.
     const visualRight = popover ? Math.max(r.right, popover.right) : r.right;
-    const w = Math.min(MAX_W, Math.max(panelW, Math.ceil(visualRight - r.left)));
+    const w = Math.min(maxW, Math.max(panelW, Math.ceil(visualRight - r.left)));
     const h = Math.max(panelH, Math.ceil(visualBottom - visualTop));
     try {
       const { LogicalSize } = await import("@tauri-apps/api/dpi");
-      // Mark the popover before enlarging the webview so the dock never observes a larger cell.
-      if (menuOpen) await reportMenuOpen(true);
-      if (revision !== fitRevision) return;
       await setNativeTopInset(menuTopInset);
-      await getCurrentWindow().setSize(new LogicalSize(w, h));
       if (revision !== fitRevision) return;
-      // Report close after shrinking, preventing a watchdog tick from briefly reflowing docks.
-      if (!menuOpen) {
-        await reportMenuOpen(false);
-        void dockRelayout().catch(() => {});
-      }
+      await getCurrentWindow().setSize(new LogicalSize(w, h));
     } catch {
       /* not in Tauri */
     }
@@ -332,56 +274,25 @@
     if (!collapsed) menuOpen = false;
   });
 
-  // Re-fit when the style, header layout, or popover visibility changes the visual bounds.
+  // Re-fit when the header layout or popover visibility changes the visual bounds. Content
+  // changes (a style switch, a member joining the grid, a label change) resize the panel
+  // itself, which the ResizeObservers below catch.
   $effect(() => {
-    style;
     menuOpen;
     collapsed;
-    // Switching the Antigravity headline group swaps the bucket labels, changing the body's
-    // width: refit on the state change itself rather than waiting for the body observer.
-    headlineGroup;
-    // Reading these is how the widget reacts to a `widget://uniform-size` broadcast.
-    uniformMinW;
-    uniformMinH;
-    // Must run before fitWindow, so the applied measurement already includes the minimum.
-    applyUniform();
+    columns;
     void fitWindow();
-  });
-
-  // Measure the body element directly, the moment it exists (`bodyEl` only appears once a
-  // snapshot has loaded successfully - before that there's just a "loading" placeholder, no
-  // `.body` div to bind). `ResizeObserver.observe()` delivers an immediate first callback with
-  // the element's current size regardless of when it's attached, which is what makes this
-  // reliable no matter how long the first snapshot took (Antigravity's process/port discovery
-  // is slower than Claude/Gemini's cached read, so its body can mount well after this
-  // component's other effects already ran once). This alone isn't sufficient, though: see
-  // `.body`'s `align-self: flex-start` below for the actual root cause of why a late-arriving
-  // measurement used to come back wrong, not just late.
-  $effect(() => {
-    if (!bodyEl || !("ResizeObserver" in window)) return;
-    const el = bodyEl;
-    const bodyRo = new ResizeObserver(() => void fitWindow());
-    bodyRo.observe(el);
-    return () => bodyRo.disconnect();
   });
 
   onMount(async () => {
     await initWindow();
-    // Colour the widget's metrics to match the service's brand.
-    const c = colorsFor(myService);
-    document.documentElement.style.setProperty("--m1", c.m1);
-    document.documentElement.style.setProperty("--m2", c.m2);
-    const initialSnap = await retryInvoke(() => getUsage(myService));
-    if (initialSnap !== undefined) snap = initialSnap;
     const initialSettings = await retryInvoke(() => getSettings());
     if (initialSettings !== undefined) applySettings(initialSettings);
-    // A window created after the size was last broadcast (a service logged in while the app
-    // runs) would otherwise never learn the size the other widgets are already using.
-    const initialUniform = await retryInvoke(() => getWidgetUniformSize());
-    if (initialUniform !== undefined) {
-      uniformW = initialUniform.width;
-      uniformH = initialUniform.height;
+    if (isGroup) {
+      const initialMembers = await retryInvoke(() => getDockMembers());
+      if (initialMembers !== undefined) members = initialMembers;
     }
+    await loadSnaps(cells);
     try {
       updateInfo = await getUpdateState();
     } catch {
@@ -390,7 +301,9 @@
     try {
       unlisteners.push(
         await listen<UsageSnapshot>("usage://updated", (e) => {
-          if (e.payload.service_id === myService) snap = e.payload;
+          if (isGroup || e.payload.service_id === myService) {
+            snaps = { ...snaps, [e.payload.service_id]: e.payload };
+          }
         }),
       );
       unlisteners.push(
@@ -399,12 +312,14 @@
       unlisteners.push(
         await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
       );
-      unlisteners.push(
-        await listen<{ width: number; height: number }>("widget://uniform-size", (e) => {
-          uniformW = e.payload.width;
-          uniformH = e.payload.height;
-        }),
-      );
+      if (isGroup) {
+        unlisteners.push(
+          await listen<string[]>("dock://members", (e) => {
+            members = e.payload;
+            void loadSnaps(e.payload);
+          }),
+        );
+      }
       unlisteners.push(await getCurrentWindow().onScaleChanged(() => void fitWindow()));
       unlisteners.push(
         await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
@@ -414,9 +329,17 @@
     } catch {
       /* preview */
     }
-    if (panelEl && "ResizeObserver" in window) {
-      ro = new ResizeObserver(() => void fitWindow());
-      ro.observe(panelEl);
+    if ("ResizeObserver" in window) {
+      if (panelEl) {
+        ro = new ResizeObserver(() => void fitWindow());
+        ro.observe(panelEl);
+      }
+      // The content can change width without the panel doing so (when the header is the
+      // wider of the two), and `collapsed` has to follow the content.
+      if (contentEl) {
+        contentRo = new ResizeObserver(() => void fitWindow());
+        contentRo.observe(contentEl);
+      }
     }
     void fitWindow();
     timer = window.setInterval(() => (now = Date.now()), 1000);
@@ -425,57 +348,53 @@
   onDestroy(() => {
     if (timer) clearInterval(timer);
     ro?.disconnect();
+    contentRo?.disconnect();
     unlisteners.forEach((u) => u());
-    if (reportedMenuOpen) void setWidgetMenuOpen(myService, false).catch(() => {});
   });
 
+  // Optimistic toggles: flip the local copy first so the icon responds at once; the command
+  // persists and re-broadcasts `settings://changed`, which re-applies the same value.
   async function toggleAoT() {
-    alwaysOnTop = !alwaysOnTop;
+    if (!settings) return;
+    const next = !alwaysOnTop;
+    if (isGroup) settings.dock.always_on_top = next;
+    else settings.widgets = { ...settings.widgets, [myService]: { ...widgetConfig(settings, myService), always_on_top: next } };
     try {
-      await setAlwaysOnTop(myService, alwaysOnTop);
+      if (isGroup) await setDockAlwaysOnTop(next);
+      else await setAlwaysOnTop(myService, next);
     } catch {
       /* preview */
     }
   }
 
   async function toggleLock() {
-    moveLocked = !moveLocked;
+    if (!settings) return;
+    const next = !moveLocked;
+    if (isGroup) settings.dock.move_lock = next;
+    else settings.widgets = { ...settings.widgets, [myService]: { ...widgetConfig(settings, myService), move_lock: next } };
     try {
-      await setMoveLock(myService, moveLocked);
+      if (isGroup) await setDockMoveLock(next);
+      else await setMoveLock(myService, next);
     } catch {
       /* preview */
     }
   }
 
-  // Antigravity only: pick which model group the headline shows. Optimistic like the toggles
-  // above; the command re-broadcasts `settings://changed`, which re-applies the same value.
-  async function pickGroup(group: "gemini" | "3p") {
-    if (headlineGroup === group) return;
-    headlineGroup = group;
+  // Antigravity only: pick which model group its cell's headline shows.
+  async function pickGroup(service: string, group: "gemini" | "3p") {
+    if (!settings) return;
+    const cur = widgetConfig(settings, service);
+    if (cur.headline_group === group) return;
+    settings.widgets = { ...settings.widgets, [service]: { ...cur, headline_group: group } };
     try {
-      await setWidgetHeadlineGroup(myService, group);
+      await setWidgetHeadlineGroup(service, group);
     } catch {
       /* preview */
     }
   }
 
-  // Group drag state (docked widgets only). A docked widget cannot use the native
-  // startDragging() - moving only its own OS window would leave the rest of the group
-  // behind - so it drives the drag itself via pointer capture and reports the resulting
-  // absolute position to Rust each frame; Rust owns turning that into a group move.
-  let dragPointerId: number | null = null;
-  // True once the async `outerPosition()` baseline (below) has resolved. `onDragMove` ignores
-  // moves until then - the alternative (computing a delta against a not-yet-known start
-  // position) would send Rust a wrong absolute position for the first few frames.
-  let dragReady = false;
-  let dragStartScreenX = 0;
-  let dragStartScreenY = 0;
-  let dragStartWinX = 0;
-  let dragStartWinY = 0;
-  let dragRafPending = false;
-  let dragLatestScreenX = 0;
-  let dragLatestScreenY = 0;
-
+  // The whole window - one service's, or the docked group's - is a single OS window, so a
+  // native drag moves everything in it together.
   function startDrag(e: PointerEvent) {
     const target = e.target as HTMLElement;
     // A click on the panel background (not a control) closes an open menu and starts a drag.
@@ -483,69 +402,9 @@
     if (moveLocked || e.button !== 0) return;
     if (target.closest(".menu")) return;
     if (target.closest("button")) return;
-
-    if (amIDocked) {
-      // Capture the pointer FIRST, synchronously - before any await. The widget panel is
-      // small, so fast mouse movement right after pointerdown can otherwise carry the cursor
-      // off the panel before capture is established; once that happens, subsequent
-      // pointermove/pointerup route to whatever element is now under the cursor instead of
-      // here, which is exactly what made dragging feel like it lost track of the mouse and
-      // never noticed the drag ending. `e.currentTarget` is also only valid synchronously
-      // during dispatch (the DOM clears it once dispatch finishes), so it must be read now,
-      // not after the `outerPosition()` await below.
-      const panel = e.currentTarget as HTMLElement;
-      dragPointerId = e.pointerId;
-      dragReady = false;
-      panel.setPointerCapture(e.pointerId);
-      dragStartScreenX = e.screenX;
-      dragStartScreenY = e.screenY;
-      void getCurrentWindow()
-        .outerPosition()
-        .then((pos) => {
-          dragStartWinX = pos.x;
-          dragStartWinY = pos.y;
-          dragReady = true;
-        })
-        .catch(() => {
-          dragPointerId = null;
-        });
-      return;
-    }
     getCurrentWindow()
       .startDragging()
       .catch(() => {});
-  }
-
-  function onDragMove(e: PointerEvent) {
-    if (dragPointerId === null || e.pointerId !== dragPointerId || !dragReady) return;
-    dragLatestScreenX = e.screenX;
-    dragLatestScreenY = e.screenY;
-    if (dragRafPending) return;
-    dragRafPending = true;
-    requestAnimationFrame(() => {
-      dragRafPending = false;
-      if (dragPointerId === null) return;
-      const scale = window.devicePixelRatio || 1;
-      const dx = Math.round((dragLatestScreenX - dragStartScreenX) * scale);
-      const dy = Math.round((dragLatestScreenY - dragStartScreenY) * scale);
-      void dockMoveTo(myService, dragStartWinX + dx, dragStartWinY + dy).catch(() => {});
-    });
-  }
-
-  function endDrag(e: PointerEvent) {
-    if (dragPointerId === null || e.pointerId !== dragPointerId) return;
-    const wasReady = dragReady;
-    dragPointerId = null;
-    dragReady = false;
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      /* already released */
-    }
-    // Persist the anchor now that the drag is actually over (see move_group_to's doc comment
-    // for why it isn't written to disk on every frame during the drag itself). Only if the
-    // drag ever got past the "ready" point - otherwise nothing moved, nothing to save.
-    if (wasReady) void dockMoveEnd().catch(() => {});
   }
 
   function toggleMenu(e: MouseEvent) {
@@ -598,112 +457,91 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="panel"
+    class:group={isGroup}
     bind:this={panelEl}
-    onpointerdown={startDrag}
-    onpointermove={onDragMove}
-    onpointerup={endDrag}
-    onpointercancel={endDrag}
-    onlostpointercapture={endDrag}>
-  <header>
-    <span class="title">
-      {#if SERVICE_ICONS[myService]}<span class="svc-icon">{@html SERVICE_ICONS[myService]}</span>{/if}
-      <span>{serviceName}</span>
-    </span>
-    {#if collapsed}
-      <button
-        class="kebab"
-        class:on={menuOpen}
-        title={$t("common.settings")}
-        aria-label={$t("common.settings")}
-        onclick={toggleMenu}>{@html KEBAB}</button>
-    {:else}
-      <div class="tools">
-        {#if updateInfo?.available}
-          <button
-            class="tool update"
-            disabled={updating}
-            title={$t("widget.update", { version: updateInfo.version })}
-            aria-label={$t("widget.update", { version: updateInfo.version })}
-            onclick={doUpdate}>{@html UPDATE}</button>
+    style:max-width="{maxW}px"
+    style:--m1={serviceColors?.m1}
+    style:--m2={serviceColors?.m2}
+    onpointerdown={startDrag}>
+    <header>
+      <span class="title">
+        {#if isGroup}
+          <span>{$t("app.name")}</span>
+        {:else}
+          {#if serviceIcon}<span class="svc-icon">{@html serviceIcon}</span>{/if}
+          <span>{serviceName}</span>
         {/if}
-        <button class="tool" title={$t("common.stats")} aria-label={$t("common.stats")} onclick={openStats}>{@html STATS}</button>
-        <button class="tool" title={$t("widgetStyle.title")} aria-label={$t("widgetStyle.title")} onclick={openStyle}>{@html PALETTE}</button>
-        <button class="tool" title={$t("common.settings")} aria-label={$t("common.settings")} onclick={openSettings}>{@html GEAR}</button>
-        <button class="tool" class:active={alwaysOnTop} title={$t("widget.alwaysOnTop")} aria-label={$t("widget.alwaysOnTop")} onclick={toggleAoT}>{@html PIN}</button>
-        <button class="tool" class:active={moveLocked} title={$t("widget.moveLock")} aria-label={$t("widget.moveLock")} onclick={toggleLock}>{@html moveLocked ? LOCK : UNLOCK}</button>
-      </div>
-    {/if}
-  </header>
+      </span>
+      {#if collapsed}
+        <button
+          class="kebab"
+          class:on={menuOpen}
+          title={$t("common.settings")}
+          aria-label={$t("common.settings")}
+          onclick={toggleMenu}>{@html KEBAB}</button>
+      {:else}
+        <div class="tools">
+          {#if updateInfo?.available}
+            <button
+              class="tool update"
+              disabled={updating}
+              title={$t("widget.update", { version: updateInfo.version })}
+              aria-label={$t("widget.update", { version: updateInfo.version })}
+              onclick={doUpdate}>{@html UPDATE}</button>
+          {/if}
+          <button class="tool" title={$t("common.stats")} aria-label={$t("common.stats")} onclick={openStats}>{@html STATS}</button>
+          <button class="tool" title={$t("widgetStyle.title")} aria-label={$t("widgetStyle.title")} onclick={openStyle}>{@html PALETTE}</button>
+          <button class="tool" title={$t("common.settings")} aria-label={$t("common.settings")} onclick={openSettings}>{@html GEAR}</button>
+          <button class="tool" class:active={alwaysOnTop} title={$t("widget.alwaysOnTop")} aria-label={$t("widget.alwaysOnTop")} onclick={toggleAoT}>{@html PIN}</button>
+          <button class="tool" class:active={moveLocked} title={$t("widget.moveLock")} aria-label={$t("widget.moveLock")} onclick={toggleLock}>{@html moveLocked ? LOCK : UNLOCK}</button>
+        </div>
+      {/if}
+    </header>
 
     {#if collapsed && menuOpen}
       <div class="menu" class:up={menuOpensUp} bind:this={menuEl}>
-      {#if updateInfo?.available}
-        <button class="mitem accent" disabled={updating} onclick={() => nav(doUpdate)}>
-          {@html UPDATE}<span>{$t("widget.update", { version: updateInfo.version })}</span>
+        {#if updateInfo?.available}
+          <button class="mitem accent" disabled={updating} onclick={() => nav(doUpdate)}>
+            {@html UPDATE}<span>{$t("widget.update", { version: updateInfo.version })}</span>
+          </button>
+        {/if}
+        <button class="mitem" class:on={alwaysOnTop} onclick={toggleAoT}>
+          {@html PIN}<span>{$t("widget.alwaysOnTop")}</span>
         </button>
-      {/if}
-      <button class="mitem" class:on={alwaysOnTop} onclick={toggleAoT}>
-        {@html PIN}<span>{$t("widget.alwaysOnTop")}</span>
-      </button>
-      <button class="mitem" class:on={moveLocked} onclick={toggleLock}>
-        {@html moveLocked ? LOCK : UNLOCK}<span>{$t("widget.moveLock")}</span>
-      </button>
-      <button class="mitem" onclick={() => nav(openStyle)}>
-        {@html PALETTE}<span>{$t("widgetStyle.title")}</span>
-      </button>
-      <button class="mitem" onclick={() => nav(openStats)}>
-        {@html STATS}<span>{$t("common.stats")}</span>
-      </button>
-      <button class="mitem" onclick={() => nav(openSettings)}>
-        {@html GEAR}<span>{$t("common.settings")}</span>
-      </button>
+        <button class="mitem" class:on={moveLocked} onclick={toggleLock}>
+          {@html moveLocked ? LOCK : UNLOCK}<span>{$t("widget.moveLock")}</span>
+        </button>
+        <button class="mitem" onclick={() => nav(openStyle)}>
+          {@html PALETTE}<span>{$t("widgetStyle.title")}</span>
+        </button>
+        <button class="mitem" onclick={() => nav(openStats)}>
+          {@html STATS}<span>{$t("common.stats")}</span>
+        </button>
+        <button class="mitem" onclick={() => nav(openSettings)}>
+          {@html GEAR}<span>{$t("common.settings")}</span>
+        </button>
       </div>
     {/if}
 
-    {#if snap === null}
-      <div class="empty">{$t("common.loading")}</div>
-    {:else if snap.status !== "ok"}
-      <div class="empty">
-        {snap.status === "unauthorized"
-          ? $t("common.sessionExpired")
-          : snap.status === "not_running"
-            ? $t("common.antigravityNotRunning")
-            : snap.status === "error"
-              ? $t("common.usageUnavailable")
-              : $t("common.notLoggedIn")}
-      </div>
-    {:else}
-      <div class="body" bind:this={bodyEl}>
-        <WidgetStyle
-          styleId={style}
-          snapshot={snap}
+    <!-- One cell per service. The docked window packs them row-major into `columns` columns of
+         equal width (the widest cell sets it) and rows of equal height, so the cells line up
+         with no per-window size bookkeeping. -->
+    <div class="content" class:grid={isGroup} style:--cols={columns} bind:this={contentEl}>
+      {#each cells as svc, i (svc)}
+        <ServiceCell
+          service={svc}
+          snap={snaps[svc] ?? null}
+          config={cellConfig(svc)}
           {now}
-          {displayMode}
-          {primaryKeyOverride}
-          {secondaryKeyOverride} />
-      </div>
-      {#if myService === "antigravity_ide"}
-        <!-- Antigravity reports two model groups; this swaps which pair the headline shows,
-             without opening the Widget Style window. Deliberately a sibling of `.body`, never
-             a child: `collapsed` is a pure function of `bodyWidth`, so a control inside the
-             body would feed its own width back into that judgement (see the `.body` comment
-             in the styles below). -->
-        <div class="seg" class:tight={collapsed} role="group" aria-label={$t("widgetStyle.headlineGroup")}>
-          <button
-            class="sbtn"
-            class:on={headlineGroup === "gemini"}
-            aria-pressed={headlineGroup === "gemini"}
-            title={$t("widgetStyle.groupGemini")}
-            onclick={() => pickGroup("gemini")}><span>{$t("widgetStyle.groupGemini")}</span></button>
-          <button
-            class="sbtn"
-            class:on={headlineGroup === "3p"}
-            aria-pressed={headlineGroup === "3p"}
-            title={$t("widgetStyle.groupThirdParty")}
-            onclick={() => pickGroup("3p")}><span>{$t("widgetStyle.groupThirdParty")}</span></button>
-        </div>
+          titled={isGroup}
+          sepLeft={isGroup && i % columns !== 0}
+          sepTop={isGroup && i >= columns}
+          onPickGroup={(g) => void pickGroup(svc, g)} />
+      {/each}
+      {#if cells.length === 0}
+        <div class="empty">{$t("common.loading")}</div>
       {/if}
-    {/if}
+    </div>
   </div>
 </div>
 
@@ -717,7 +555,6 @@
     flex-direction: column;
     /* Hug the content so the window can shrink to it (set by fitWindow). */
     width: max-content;
-    max-width: 360px;
     padding: 8px 10px 9px;
     background: rgb(var(--panel));
     opacity: var(--panel-alpha);
@@ -727,6 +564,15 @@
     user-select: none;
     cursor: default;
     overflow: visible;
+  }
+  /* The docked window: the cells carry their own padding, so the panel only keeps a thin
+     frame and the header is inset to line up with the first cell's content. */
+  .panel.group {
+    padding: 8px 4px 4px;
+  }
+  .panel.group header {
+    padding: 0 6px;
+    margin-bottom: 4px;
   }
   header {
     display: flex;
@@ -748,7 +594,7 @@
   }
   .svc-icon {
     display: inline-flex;
-    /* Tinted with the service's brand colour, set on <html> in onMount. */
+    /* Tinted with the service's brand colour (--m1, set on the panel for a single service). */
     color: rgb(var(--m1));
   }
   .kebab {
@@ -856,27 +702,28 @@
   .mitem:disabled {
     opacity: 0.6;
   }
-  .body {
+  .content {
     display: flex;
     flex-direction: column;
-    /* Root cause of the icon-collapse bug: `.panel` is a column flex container, and its
-       children default to `align-items: stretch` - so without this, `.body` stretches to
-       *whatever width `.panel` currently happens to be* (which, before the icon row has
-       collapsed, is the wide uncollapsed-header width) instead of its own narrow intrinsic
-       content width. `fitWindow()` then measures that already-stretched (wide) box, `collapsed`
-       computes false again, the header stays wide, and the loop never escapes - a
-       self-reinforcing wrong state that re-measuring more often (which is where the previous
-       fix attempts focused) cannot fix, since every re-measurement just re-confirms the same
-       stretched value. `align-self: flex-start` makes `.body` size to its own natural content
-       width regardless of the panel's current width, so the measurement is always genuine.
-       Keep it. Size unification applies its minimum to `.panel` only, for the same reason:
-       a minimum on `.body` would re-open exactly this loop. */
+    /* Root cause of the icon-collapse bug of old: `.panel` is a column flex container, and
+       its children default to `align-items: stretch` - so without this, the content would
+       stretch to *whatever width `.panel` currently happens to be* (which, before the icon
+       row has collapsed, is the wide uncollapsed-header width) instead of its own narrow
+       intrinsic width. `fitWindow()` then measures that already-stretched (wide) box,
+       `collapsed` computes false again, the header stays wide, and the loop never escapes.
+       `align-self: flex-start` + `width: max-content` make this element size to its own
+       content regardless of the panel's current width, so the measurement is always genuine.
+       Keep it. */
     align-self: flex-start;
-    /* Absorbs the slack when size unification makes the panel taller than this widget needs,
-       centring the readout instead of leaving it pinned under the header. Main-axis only -
-       the cross axis stays `flex-start` above, so width measurement is unaffected. */
-    flex: 1 0 auto;
-    justify-content: center;
+    width: max-content;
+    max-width: 100%;
+  }
+  .content.grid {
+    display: grid;
+    /* Every column as wide as the widest cell (a grid sized to its content shares the
+       max-content width across `1fr` tracks), every row as tall as the tallest one. */
+    grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+    grid-auto-rows: 1fr;
   }
   .empty {
     text-align: center;
@@ -884,69 +731,5 @@
     color: rgb(var(--fg-muted));
     padding: 12px 8px;
     white-space: nowrap;
-    /* Same reason as `.body`: centre the loading / signed-out / not-running message in a
-       panel that unification has made taller. */
-    flex: 1 0 auto;
-    display: grid;
-    place-items: center;
-  }
-  /* Antigravity's model-group switch. Two constraints:
-     1) It must never widen the widget. Every label is absolutely positioned, so none of them
-        contributes to `.panel`'s max-content width - the same property that stops `.menu` from
-        widening the panel (see the `visualRight` comment in fitWindow). All this row adds
-        intrinsically is its own padding, border and gap.
-     2) It stays a `.panel` child, never a `.body` child - see the `.body` comment above. */
-  .seg {
-    display: flex;
-    gap: 2px;
-    margin-top: 7px;
-    padding: 2px;
-    border: 1px solid rgb(var(--border));
-    border-radius: 8px;
-    background: rgb(var(--track) / 0.45);
-  }
-  .sbtn {
-    position: relative; /* containing block for the absolutely positioned label */
-    flex: 1 1 0;
-    min-width: 0;
-    height: 20px;
-    padding: 0;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: rgb(var(--fg-muted));
-    cursor: default;
-  }
-  .sbtn > span {
-    /* Absolute so the label never sets a floor under the widget's width; it is clipped with an
-       ellipsis instead, and the full text stays available as the button's `title`. */
-    position: absolute;
-    inset: 0;
-    padding: 0 4px;
-    line-height: 20px;
-    font-size: 0.66rem;
-    font-weight: 600;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .seg.tight .sbtn > span {
-    /* Narrow styles (the same threshold that collapses the icon row) get a tighter label so
-       "Claude/GPT" still fits instead of being clipped. Safe from the feedback loop `collapsed`
-       would otherwise imply: `.seg` sits outside `.body`, so it cannot influence `bodyWidth`,
-       which is the only input `collapsed` has. */
-    font-size: 0.58rem;
-    padding: 0 2px;
-    letter-spacing: -0.01em;
-  }
-  .sbtn:hover {
-    background: rgb(var(--accent) / 0.14);
-    color: rgb(var(--fg));
-  }
-  .sbtn.on {
-    /* Matches the Widget Style window's segmented control (`.tbtn.active`). */
-    background: rgb(var(--accent));
-    color: rgb(var(--on-accent));
   }
 </style>

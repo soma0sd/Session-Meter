@@ -180,10 +180,19 @@
       enabled: s.dock.enabled,
       columns: s.dock.columns,
       order: dockOrder,
+      opacity: s.dock.opacity,
+      always_on_top: s.dock.always_on_top,
+      move_lock: s.dock.move_lock,
       ...patch,
     };
     s = { ...s, dock: { ...s.dock, ...next } };
     void setDockConfig(next);
+  }
+
+  // A service whose widget currently lives in the docked window (docking on and listed in the
+  // order) has no window of its own, so its per-window controls would do nothing.
+  function isDockedMember(service: string): boolean {
+    return !!s?.dock.enabled && dockOrder.includes(service);
   }
 
   // Drag-and-drop reordering (native HTML5 DnD - the webview is Chromium-based, so this
@@ -304,6 +313,28 @@
             {/each}
           </div>
 
+          <div class="field">
+            <span class="flabel">{$t("widgetStyle.opacity")}</span>
+            <input
+              type="range"
+              min="0.3"
+              max="1"
+              step="0.05"
+              disabled={!dock.enabled}
+              value={dock.opacity}
+              oninput={(e) => saveDock({ opacity: Number((e.target as HTMLInputElement).value) })} />
+            <span class="fval">{Math.round(dock.opacity * 100)}%</span>
+          </div>
+
+          <label class="check">
+            <input
+              type="checkbox"
+              disabled={!dock.enabled}
+              checked={dock.always_on_top}
+              onchange={(e) => saveDock({ always_on_top: (e.target as HTMLInputElement).checked })} />
+            <span>{$t("widget.alwaysOnTop")}</span>
+          </label>
+
           <p class="hint">{$t("dock.hint")}</p>
         </section>
       {/if}
@@ -312,6 +343,7 @@
         {@const wc = widgetConfig(s, svc.id)}
         {@const primaryOv = svc.id === "antigravity_ide" ? `${wc.headline_group}-5h` : null}
         {@const secondaryOv = svc.id === "antigravity_ide" ? `${wc.headline_group}-weekly` : null}
+        {@const docked = isDockedMember(svc.id)}
         <section class="svc">
           <div class="previewWrap">
             <div class="previewPanel">
@@ -398,6 +430,7 @@
               min="0.3"
               max="1"
               step="0.05"
+              disabled={docked}
               value={wc.opacity}
               oninput={(e) => updateWidget(svc.id, { opacity: Number((e.target as HTMLInputElement).value) })} />
             <span class="fval">{Math.round(wc.opacity * 100)}%</span>
@@ -414,10 +447,13 @@
           <label class="check">
             <input
               type="checkbox"
+              disabled={docked}
               checked={wc.always_on_top}
               onchange={(e) => updateWidget(svc.id, { always_on_top: (e.target as HTMLInputElement).checked })} />
             <span>{$t("widget.alwaysOnTop")}</span>
           </label>
+
+          <p class="hint">{docked ? $t("dock.memberNote") : $t("widget.taskbarHint")}</p>
         </section>
       {/each}
     {/if}

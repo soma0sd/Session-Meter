@@ -101,11 +101,13 @@ impl Default for WidgetConfig {
     }
 }
 
-/// Widget grid docking: several widgets snapped into a grid that move together when any one
-/// of them is dragged. See `dock.rs` for the layout engine. `anchor_x`/`anchor_y` are NOT
-/// serialized here in practice - `load`/`save` overlay them from `window.json` (see
-/// `save_dock_anchor`/`load_dock_anchor`) so a group drag never rewrites the whole settings
-/// file. They stay on this struct so callers have one place to read the full config from.
+/// Widget docking: the docked services are drawn as cells of one shared window (see
+/// `dock.rs`). The group window has appearance/behavior settings of its own - `opacity`,
+/// `always_on_top`, `move_lock` - because it is one window, not the per-service ones the
+/// members carry for their own windows. `anchor_x`/`anchor_y` (the group window's position)
+/// are NOT serialized here in practice - `load`/`save` overlay them from `window.json` (see
+/// `save_dock_anchor`/`load_dock_anchor`) so a drag never rewrites the whole settings file.
+/// They stay on this struct so callers have one place to read the full config from.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct DockConfig {
@@ -113,6 +115,9 @@ pub struct DockConfig {
     pub columns: u32,
     /// Service ids in row-major placement order.
     pub order: Vec<String>,
+    pub opacity: f64,
+    pub always_on_top: bool,
+    pub move_lock: bool,
     pub anchor_x: i32,
     pub anchor_y: i32,
 }
@@ -123,6 +128,9 @@ impl Default for DockConfig {
             enabled: false,
             columns: 2,
             order: Vec::new(),
+            opacity: 0.9,
+            always_on_top: true,
+            move_lock: false,
             anchor_x: 0,
             anchor_y: 0,
         }
@@ -639,6 +647,9 @@ mod settings_tests {
         assert!(!s.dock.enabled, "dock defaults to disabled");
         assert_eq!(s.dock.columns, 2, "dock defaults to 2 columns");
         assert!(s.dock.order.is_empty(), "dock defaults to an empty order");
+        assert!((s.dock.opacity - 0.9).abs() < 1e-9, "dock window defaults to 90% opacity");
+        assert!(s.dock.always_on_top, "dock window defaults to always on top");
+        assert!(!s.dock.move_lock, "dock window defaults to movable");
     }
 
     #[test]

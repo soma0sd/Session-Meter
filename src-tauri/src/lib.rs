@@ -20,10 +20,7 @@ mod theme;
 mod tray;
 mod update;
 mod usage;
-mod widget_size;
 mod windows;
-
-use std::sync::atomic::Ordering;
 
 use tauri::{Manager, WindowEvent};
 
@@ -123,41 +120,28 @@ pub fn run() {
             WindowEvent::Focused(false) if window.label() == "menu" => {
                 let _ = window.hide();
             }
-            // Persist a service widget's position as the user drags it, so a reboot restores
-            // the last placement instead of the default corner. A docked widget's position is
-            // owned by `dock::apply_layout` instead: its `Moved` events are either an echo of
-            // our own relayout (ignored) or real drift (corrected back onto the grid), and
-            // never persisted individually - the group's one position is the anchor.
-            WindowEvent::Moved(pos)
-                if windows::service_from_widget_label(window.label()).is_some() =>
+            // Keep a widget window (a service's own, or the docked group's) fully on screen as
+            // the user drags it, and whenever its page resizes it to fit new content (a style
+            // switch, a cell joining the docked grid) - growing near a screen edge can push it
+            // partly off. Positions are persisted when the window hides or the app exits, plus
+            // right here whenever the clamp had to move it.
+            WindowEvent::Moved(_) | WindowEvent::Resized(_)
+                if windows::is_widget_window(window.label()) =>
             {
-                if pos.x > -32000
-                    && pos.y > -32000
+                // Windows parks a minimizing/hiding window at (-32000,-32000); never "correct" that.
+                let parked = window
+                    .outer_position()
+                    .map(|p| p.x <= -32000 || p.y <= -32000)
+                    .unwrap_or(true);
+                if !parked
                     && matches!(window.is_visible(), Ok(true))
                     && !matches!(window.is_minimized(), Ok(true))
                 {
-                    if let Some(service) = windows::service_from_widget_label(window.label()) {
-                        let app = window.app_handle();
-                        // An upward compact-menu popover temporarily moves only the native
-                        // window to make transparent room above the fixed panel. Do not treat
-                        // that implementation detail as a user drag or a new dock anchor.
-                        let menu_open = app
-                            .try_state::<AppState>()
-                            .map(|s| s.widget_menus_open.lock().unwrap().contains(&service))
-                            .unwrap_or(false);
-                        if !menu_open {
-                            if dock::is_docked(app, &service) {
-                                let in_progress = app
-                                    .try_state::<AppState>()
-                                    .map(|s| s.dock_relayout_in_progress.load(Ordering::SeqCst))
-                                    .unwrap_or(false);
-                                if !in_progress {
-                                    dock::on_widget_moved(app, &service, pos.x, pos.y);
-                                }
-                            } else {
-                                windows::ensure_widget_on_screen(app, &service);
-                            }
-                        }
+                    let app = window.app_handle();
+                    if window.label() == windows::DOCK_LABEL {
+                        windows::ensure_dock_on_screen(app);
+                    } else if let Some(service) = windows::service_from_widget_label(window.label()) {
+                        windows::ensure_widget_on_screen(app, &service);
                     }
                 }
             }
@@ -206,14 +190,10 @@ pub fn run() {
             commands::set_widget_headline_group,
             commands::set_widget_opacity,
             commands::set_widget_visible,
-            commands::set_widget_base_size,
-            commands::set_widget_natural_size,
-            commands::get_widget_uniform_size,
-            commands::set_widget_menu_open,
             commands::set_dock_config,
-            commands::dock_move_to,
-            commands::dock_move_end,
-            commands::dock_relayout,
+            commands::set_dock_always_on_top,
+            commands::set_dock_move_lock,
+            commands::get_dock_members,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -108,10 +108,15 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Se
             .or_insert_with(|| wc.clone());
     }
 
-    // Re-assert each service widget's always-on-top from its (possibly changed) config.
+    // Docking is edited only through `set_dock_config` and the two dock toggles below; never let
+    // a full-settings save from another window (which may hold an older copy) roll it back.
+    settings.dock = prev.dock.clone();
+
+    // Re-assert each service widget's layering (always-on-top + taskbar presence) from its
+    // (possibly changed) config.
     for (svc, wc) in &settings.widgets {
         if let Some(win) = app.get_webview_window(&crate::windows::widget_label(svc)) {
-            let _ = win.set_always_on_top(wc.always_on_top);
+            windows::apply_layering(&win, wc.always_on_top);
         }
     }
 
@@ -360,9 +365,9 @@ pub fn clear_session(
     }
     config::clear_cookie(&app, &service).map_err(|e| e.to_string())?;
     crate::usage::mark_status(&app, &service, "not_logged_in");
-    if service != crate::service::CLAUDE {
-        windows::hide_runtime_widget(&app, &service);
-    }
+    // Drops the signed-out service's own widget (or its cell in the docked window). This
+    // command is synchronous, so it already runs on the main thread the window ops need.
+    windows::reconcile_widget_visibility(&app);
     let _ = app.emit(
         "session://changed",
         serde_json::json!({ "service": service, "logged_in": false, "org_name": "", "email": "" }),
@@ -409,7 +414,7 @@ pub fn set_always_on_top(
 ) -> Result<(), String> {
     let service = crate::service::normalize(service.as_deref());
     if let Some(win) = app.get_webview_window(&crate::windows::widget_label(&service)) {
-        win.set_always_on_top(on).map_err(|e| e.to_string())?;
+        windows::apply_layering(&win, on);
     }
     let updated = {
         let mut settings = state.settings.lock().unwrap();
@@ -507,86 +512,20 @@ pub fn set_widget_visible(
     Ok(())
 }
 
-/// Report a widget's normal physical panel size. The browser reports this after each regular
-/// content resize so a temporary menu popover never changes the dock grid dimensions.
-#[tauri::command]
-pub fn set_widget_base_size(
-    state: State<'_, AppState>,
-    service: String,
-    width: i32,
-    height: i32,
-) {
-    if width >= 40 && height >= 30 {
-        state
-            .widget_base_sizes
-            .lock()
-            .unwrap()
-            .insert(crate::service::normalize(Some(&service)), (width, height));
-    }
-}
-
-/// Report a widget's *natural* panel size (logical CSS px) - what it measures with the size
-/// unification minimum lifted. Kept apart from `set_widget_base_size` (the applied size, in
-/// physical px, that the dock grid stacks) so the unified maximum can never eat its own output
-/// and become a floor nothing can fall below. See `widget_size`.
-#[tauri::command]
-pub fn set_widget_natural_size(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    service: String,
-    width: i32,
-    height: i32,
-) {
-    if width < 40 || height < 30 {
-        return; // ignore a stray measurement taken before the panel has laid out
-    }
-    let service = crate::service::normalize(Some(&service));
-    let changed = {
-        let mut map = state.widget_natural_sizes.lock().unwrap();
-        map.insert(service, (width, height)) != Some((width, height))
-    };
-    if changed {
-        crate::widget_size::recompute(&app);
-    }
-}
-
-/// The size every docked widget currently grows to, in logical px (`0` for "no minimum").
-/// Pulled once when a widget mounts, since the broadcast only fires on change.
-#[tauri::command]
-pub fn get_widget_uniform_size(app: AppHandle) -> crate::widget_size::UniformSize {
-    crate::widget_size::current(&app)
-}
-
-/// Mark a widget's compact kebab popover as open or closed. Docking reads the last normal
-/// panel size while this flag is set, keeping neighboring widgets fixed in place.
-#[tauri::command]
-pub fn set_widget_menu_open(app: AppHandle, state: State<'_, AppState>, service: String, open: bool) {
-    let service = crate::service::normalize(Some(&service));
-    {
-        let mut menus = state.widget_menus_open.lock().unwrap();
-        if open {
-            menus.insert(service.clone());
-        } else {
-            menus.remove(&service);
-        }
-    }
-    if !open {
-        crate::dock::apply_layout(&app);
-        crate::widget_size::recompute(&app);
-    }
-}
-
-// --- widget grid docking ---
+// --- widget docking ---
 
 /// Everything the Widget Style window's "Placement" tab can change. Deliberately excludes
-/// `anchor_x`/`anchor_y`: those are only ever written by `dock_move_to` (a live group drag),
-/// so a stale anchor cached in an open settings window can never be round-tripped back over
-/// a more recent drag through this command.
+/// `anchor_x`/`anchor_y`: the docked window's position is only ever written by the window
+/// itself being dragged (`window.json`), so a stale anchor cached in an open settings window
+/// can never be round-tripped back over a more recent drag through this command.
 #[derive(Deserialize)]
 pub struct DockConfigPatch {
     pub enabled: bool,
     pub columns: u32,
     pub order: Vec<String>,
+    pub opacity: f64,
+    pub always_on_top: bool,
+    pub move_lock: bool,
 }
 
 #[tauri::command]
@@ -600,40 +539,57 @@ pub fn set_dock_config(
         settings.dock.enabled = patch.enabled;
         settings.dock.columns = patch.columns.clamp(1, 12);
         settings.dock.order = patch.order;
+        settings.dock.opacity = patch.opacity.clamp(0.2, 1.0);
+        settings.dock.always_on_top = patch.always_on_top;
+        settings.dock.move_lock = patch.move_lock;
+        config::save(&app, &settings).map_err(|e| e.to_string())?;
+        settings.clone()
+    };
+    if let Some(win) = app.get_webview_window(windows::DOCK_LABEL) {
+        windows::apply_layering(&win, updated.dock.always_on_top);
+    }
+    let _ = app.emit("settings://changed", &updated);
+    // Turning docking on/off, or changing who is in it, moves services between their own
+    // windows and the docked one. Synchronous command, so this is already the main thread.
+    windows::reconcile_widget_visibility(&app);
+    Ok(())
+}
+
+/// Always-on-top for the docked window, toggled from the widget itself. Mirrors
+/// `set_always_on_top` for a single service's window.
+#[tauri::command]
+pub fn set_dock_always_on_top(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(windows::DOCK_LABEL) {
+        windows::apply_layering(&win, on);
+    }
+    let updated = {
+        let mut settings = state.settings.lock().unwrap();
+        settings.dock.always_on_top = on;
         config::save(&app, &settings).map_err(|e| e.to_string())?;
         settings.clone()
     };
     let _ = app.emit("settings://changed", &updated);
-    if updated.dock.enabled {
-        crate::dock::apply_layout(&app);
-    }
-    // Outside the branch on purpose: turning docking *off* has to broadcast a zero uniform
-    // size so each widget drops back to hugging its own content.
-    crate::widget_size::recompute(&app);
     Ok(())
 }
 
-/// Live group-drag tick: `x`/`y` is where the dragged widget wants to be *now* (its physical
-/// position). No settings-changed broadcast here - this fires every animation frame while
-/// dragging and no other window renders the anchor, so broadcasting it would be pure waste.
+/// Move lock for the docked window, toggled from the widget itself.
 #[tauri::command]
-pub fn dock_move_to(app: AppHandle, service: String, x: i32, y: i32) {
-    crate::dock::move_group_to(&app, &service, x, y);
+pub fn set_dock_move_lock(app: AppHandle, state: State<'_, AppState>, locked: bool) -> Result<(), String> {
+    let updated = {
+        let mut settings = state.settings.lock().unwrap();
+        settings.dock.move_lock = locked;
+        config::save(&app, &settings).map_err(|e| e.to_string())?;
+        settings.clone()
+    };
+    let _ = app.emit("settings://changed", &updated);
+    Ok(())
 }
 
-/// Called once when a group drag ends (pointerup/cancel), to persist the anchor `dock_move_to`
-/// intentionally left unsaved on every frame during the drag itself.
+/// The services the docked window shows right now, in placement order. Pulled once when the
+/// docked window mounts; it follows `dock://members` afterwards.
 #[tauri::command]
-pub fn dock_move_end(app: AppHandle) {
-    crate::dock::move_group_end(&app);
-}
-
-/// Ask the dock layout to re-run now (e.g. after a widget's content resized). A no-op when
-/// docking is off.
-#[tauri::command]
-pub fn dock_relayout(app: AppHandle) {
-    crate::dock::apply_layout(&app);
-    crate::widget_size::recompute(&app);
+pub fn get_dock_members(app: AppHandle) -> Vec<String> {
+    crate::dock::current_members(&app)
 }
 
 // --- theme / locale ---

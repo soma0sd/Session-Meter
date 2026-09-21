@@ -569,7 +569,9 @@ pub fn clear_session(app: &AppHandle) -> Result<(), AppError> {
     CODEX_LOGIN_EPOCH.fetch_add(1, Ordering::SeqCst);
     config::clear_cookie(app, crate::service::CODEX)?;
     crate::usage::mark_status(app, crate::service::CODEX, "not_logged_in");
-    crate::windows::hide_runtime_widget(app, crate::service::CODEX);
+    // Drops the Codex widget, or its cell in the docked window. Runs from the synchronous
+    // `clear_session` command, i.e. already on the main thread the window ops need.
+    crate::windows::reconcile_widget_visibility(app);
     let _ = app.emit(
         "session://changed",
         serde_json::json!({

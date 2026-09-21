@@ -13,6 +13,7 @@
     secondaryResetMs,
     primaryLabel,
     secondaryLabel,
+    extra,
   }: WidgetStyleProps = $props();
 
   const pShown = $derived(shownPct(primaryPct, displayMode));
@@ -37,6 +38,9 @@
         <span class="ss">{sShown}%</span>
       {/if}
       <span class="rst">{formatClock(primaryResetMs)}</span>
+      {#if extra}
+        <div class="extra">{@render extra()}</div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -122,5 +126,8 @@
     color: rgb(var(--fg-muted));
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+  .extra {
+    margin-top: 2px;
   }
 </style>

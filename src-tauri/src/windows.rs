@@ -1,5 +1,6 @@
-//! Window helpers: show/hide the local windows, place the frameless widget, and
-//! position the custom themed context-menu window near the tray click.
+//! Window helpers: show/hide the local windows, place the frameless widgets (one per
+//! service, plus the docked group window), and position the custom themed context-menu
+//! window near the tray click.
 
 use std::time::Duration;
 
@@ -8,6 +9,14 @@ use tauri_plugin_positioner::{Position, WindowExt};
 
 use crate::config;
 use crate::state::AppState;
+
+/// The one frameless window that hosts every docked service as a grid cell (see `dock.rs`).
+/// Created at runtime like the non-Claude service widgets; `Widget.svelte` switches to its
+/// group mode when it finds itself running under this label.
+pub const DOCK_LABEL: &str = "widget-dock";
+
+/// Used when a widget window's `outer_size()` cannot be read yet (e.g. just created).
+const FALLBACK_SIZE: (i32, i32) = (252, 150);
 
 /// Safety net: if the login page has not left `about:blank` within 2s (webview stuck /
 /// blank / unresponsive), cancel the capture watcher and close the window so the user is
@@ -107,7 +116,7 @@ pub fn open_news(app: &AppHandle) {
     show_and_focus(app, "news");
 }
 
-/// The OS window label for a service's widget. Claude reuses the static `widget` window
+/// The OS window label for a service's own widget. Claude reuses the static `widget` window
 /// declared in tauri.conf.json (so existing behavior is unchanged); other services get a
 /// runtime `widget-{service}` window.
 pub fn widget_label(service: &str) -> String {
@@ -118,17 +127,26 @@ pub fn widget_label(service: &str) -> String {
     }
 }
 
-/// Reverse of `widget_label`: the service id a widget window label belongs to.
+/// Reverse of `widget_label`: the service id a widget window label belongs to. The docked
+/// group window (`DOCK_LABEL`) belongs to no single service and yields `None`.
 pub fn service_from_widget_label(label: &str) -> Option<String> {
     if label == "widget" {
         Some("claude".to_string())
+    } else if label == DOCK_LABEL {
+        None
     } else {
         label.strip_prefix("widget-").map(|s| s.to_string())
     }
 }
 
-/// Services that should have a widget window: Claude always (shown even before sign-in), plus
-/// any other logged-in service.
+/// True for every frameless usage widget window: the per-service ones and the docked group.
+pub fn is_widget_window(label: &str) -> bool {
+    label == DOCK_LABEL || service_from_widget_label(label).is_some()
+}
+
+/// Services that should have a widget at all: Claude always (shown even before sign-in), plus
+/// any other logged-in service. Whether a given one gets its own window or a cell in the
+/// docked window is decided per service in `reconcile_widget_visibility`.
 fn widget_services(app: &AppHandle) -> Vec<String> {
     let mut v = vec!["claude".to_string()];
     for s in crate::service::logged_in(app) {
@@ -137,6 +155,15 @@ fn widget_services(app: &AppHandle) -> Vec<String> {
         }
     }
     v
+}
+
+/// Apply a widget window's layering: always-on-top, and taskbar presence as its inverse. A
+/// widget that no longer floats above everything is an ordinary window the user may need to
+/// find again once something covers it, so it gets a taskbar button (and an Alt+Tab entry);
+/// a floating one stays out of the taskbar as before.
+pub fn apply_layering(win: &tauri::WebviewWindow, always_on_top: bool) {
+    let _ = win.set_always_on_top(always_on_top);
+    let _ = win.set_skip_taskbar(always_on_top);
 }
 
 /// Create a runtime widget window for a non-Claude service (Claude uses the static one).
@@ -155,7 +182,7 @@ pub fn create_widget_window(app: &AppHandle, service: &str) {
         .decorations(false)
         .transparent(true)
         .always_on_top(aot)
-        .skip_taskbar(true)
+        .skip_taskbar(aot)
         .resizable(false)
         .shadow(false)
         .visible(false)
@@ -166,52 +193,87 @@ pub fn create_widget_window(app: &AppHandle, service: &str) {
     }
 }
 
-/// Restore a service's widget to its saved position, or bottom-right on first use (or whenever
-/// the saved position is off-screen, self-healing a stale/sentinel value so the widget never
-/// comes back invisible). A docked widget is never placed individually - `dock::apply_layout`
-/// owns its position - so this returns immediately for one.
-/// Restore a service's widget to its saved position, or bottom-right on first use (or whenever
-/// the saved position is off-screen, self-healing a stale/sentinel value so the widget never
-/// comes back invisible). A docked widget is never placed individually - `dock::apply_layout`
-/// owns its position - so this returns immediately for one.
-fn place_widget(app: &AppHandle, win: &tauri::WebviewWindow, service: &str) {
-    if crate::dock::is_docked(app, service) {
+/// Create the docked group window (hidden). Same shell as a service widget; the page inside
+/// tells the two apart by label.
+pub fn create_dock_window(app: &AppHandle) {
+    if app.get_webview_window(DOCK_LABEL).is_some() {
         return;
     }
+    let aot = app
+        .try_state::<AppState>()
+        .map(|s| s.settings.lock().unwrap().dock.always_on_top)
+        .unwrap_or(true);
+    match tauri::WebviewWindowBuilder::new(app, DOCK_LABEL, tauri::WebviewUrl::App("widget.html".into()))
+        .title("SessionMeter Widget")
+        .inner_size(252.0, 150.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(aot)
+        .skip_taskbar(aot)
+        .resizable(false)
+        .shadow(false)
+        .visible(false)
+        .build()
+    {
+        Ok(_) => eprintln!("[cg] docked widget window created"),
+        Err(e) => eprintln!("[cg] docked widget window build error: {e}"),
+    }
+}
+
+/// Restore a window to `saved`, or bottom-right on first use (or whenever the saved position
+/// is off-screen, self-healing a stale/sentinel value so the window never comes back
+/// invisible). Returns the position it ended up at when that differs from `saved`, so the
+/// caller can persist the healed value.
+fn place_window(win: &tauri::WebviewWindow, saved: Option<(i32, i32)>) -> Option<(i32, i32)> {
     let (w, h) = win
         .outer_size()
         .map(|s| (s.width as i32, s.height as i32))
-        .unwrap_or((252, 150));
-
-    match config::load_widget_pos(app, service) {
+        .unwrap_or(FALLBACK_SIZE);
+    match saved {
         Some((x, y)) => {
             let (nx, ny, _moved) = clamp_rect_to_screen(win, x, y, w, h);
             let _ = win.set_position(PhysicalPosition::new(nx, ny));
-            if (nx, ny) != (x, y) {
-                config::save_widget_pos(app, service, nx, ny);
-            }
+            ((nx, ny) != (x, y)).then_some((nx, ny))
         }
         None => {
             let _ = win.move_window(Position::BottomRight);
-            if let Ok(pos) = win.outer_position() {
-                let (nx, ny, _moved) = clamp_rect_to_screen(win, pos.x, pos.y, w, h);
-                let _ = win.set_position(PhysicalPosition::new(nx, ny));
-                config::save_widget_pos(app, service, nx, ny);
-            }
+            let pos = win.outer_position().ok()?;
+            let (nx, ny, _moved) = clamp_rect_to_screen(win, pos.x, pos.y, w, h);
+            let _ = win.set_position(PhysicalPosition::new(nx, ny));
+            Some((nx, ny))
         }
     }
 }
 
-/// Clamps a rectangle (x, y, w, h) so that it is fully contained inside the best-matching monitor.
-/// Returns `(clamped_x, clamped_y, moved)` where `moved` is true if the rectangle was partially or
-/// fully outside the display bounds and had to be adjusted.
+fn place_widget(app: &AppHandle, win: &tauri::WebviewWindow, service: &str) {
+    if let Some((x, y)) = place_window(win, config::load_widget_pos(app, service)) {
+        config::save_widget_pos(app, service, x, y);
+    }
+}
+
+fn place_dock_window(app: &AppHandle, win: &tauri::WebviewWindow) {
+    if let Some((x, y)) = place_window(win, config::load_dock_anchor(app)) {
+        config::save_dock_anchor(app, x, y);
+    }
+}
+
+/// A monitor's work area (its bounds minus the taskbar and any other docked shell bars) as
+/// `(x, y, w, h)`. Widgets are kept inside this rather than the raw bounds: a widget that is
+/// not always-on-top would otherwise end up with its bottom rows under the taskbar.
+fn work_rect(mon: &tauri::Monitor) -> (i32, i32, i32, i32) {
+    let wa = mon.work_area();
+    (wa.position.x, wa.position.y, wa.size.width as i32, wa.size.height as i32)
+}
+
+/// Clamps a rectangle (x, y, w, h) so that it is fully contained inside the best-matching
+/// monitor's work area. Returns `(clamped_x, clamped_y, moved)` where `moved` is true if the
+/// rectangle was partially or fully outside and had to be adjusted.
 pub fn clamp_rect_to_screen(win: &tauri::WebviewWindow, x: i32, y: i32, w: i32, h: i32) -> (i32, i32, bool) {
     if x <= -32000 || y <= -32000 {
         if let Ok(Some(mon)) = win.primary_monitor() {
-            let p = mon.position();
-            let s = mon.size();
-            let target_x = p.x + (s.width as i32 - w).max(0);
-            let target_y = p.y + (s.height as i32 - h).max(0);
+            let (mx, my, mw, mh) = work_rect(&mon);
+            let target_x = mx + (mw - w).max(0);
+            let target_y = my + (mh - h).max(0);
             return (target_x, target_y, true);
         }
     }
@@ -229,18 +291,14 @@ pub fn clamp_rect_to_screen(win: &tauri::WebviewWindow, x: i32, y: i32, w: i32, 
     let mon = mons
         .iter()
         .find(|m| {
-            let p = m.position();
-            let s = m.size();
-            cx >= p.x && cy >= p.y && cx < p.x + s.width as i32 && cy < p.y + s.height as i32
+            let (mx, my, mw, mh) = work_rect(m);
+            cx >= mx && cy >= my && cx < mx + mw && cy < my + mh
         })
         .or_else(|| {
             mons.iter().max_by_key(|m| {
-                let p = m.position();
-                let s = m.size();
-                let mw = s.width as i32;
-                let mh = s.height as i32;
-                let overlap_w = (x + w).min(p.x + mw) - x.max(p.x);
-                let overlap_h = (y + h).min(p.y + mh) - y.max(p.y);
+                let (mx, my, mw, mh) = work_rect(m);
+                let overlap_w = (x + w).min(mx + mw) - x.max(mx);
+                let overlap_h = (y + h).min(my + mh) - y.max(my);
                 if overlap_w > 0 && overlap_h > 0 {
                     overlap_w * overlap_h
                 } else {
@@ -255,65 +313,88 @@ pub fn clamp_rect_to_screen(win: &tauri::WebviewWindow, x: i32, y: i32, w: i32, 
         return (x, y, false);
     };
 
-    let p = mon.position();
-    let s = mon.size();
-    let mw = s.width as i32;
-    let mh = s.height as i32;
-
-    let is_fully_contained = x >= p.x && y >= p.y && (x + w) <= (p.x + mw) && (y + h) <= (p.y + mh);
+    let (mx, my, mw, mh) = work_rect(mon);
+    let is_fully_contained = x >= mx && y >= my && (x + w) <= (mx + mw) && (y + h) <= (my + mh);
 
     if is_fully_contained {
         (x, y, false)
     } else {
-        let clamped_x = if w >= mw { p.x } else { x.clamp(p.x, p.x + mw - w) };
-        let clamped_y = if h >= mh { p.y } else { y.clamp(p.y, p.y + mh - h) };
+        let clamped_x = if w >= mw { mx } else { x.clamp(mx, mx + mw - w) };
+        let clamped_y = if h >= mh { my } else { y.clamp(my, my + mh - h) };
         (clamped_x, clamped_y, true)
     }
 }
 
-/// Ensure the specified widget is fully inside screen bounds. Moves it inside if any part is outside.
-pub fn ensure_widget_on_screen(app: &AppHandle, service: &str) {
-    if crate::dock::is_docked(app, service) {
-        return;
-    }
-    let Some(win) = app.get_webview_window(&widget_label(service)) else {
-        return;
-    };
+/// Move a visible, non-minimized window fully back inside screen bounds if any part of it is
+/// outside. Returns the corrected position when it had to move.
+fn ensure_on_screen(win: &tauri::WebviewWindow) -> Option<(i32, i32)> {
     if matches!(win.is_minimized(), Ok(true)) {
-        return;
+        return None;
     }
-    let Ok(pos) = win.outer_position() else {
-        return;
-    };
+    let pos = win.outer_position().ok()?;
     let (w, h) = win
         .outer_size()
         .map(|s| (s.width as i32, s.height as i32))
-        .unwrap_or((252, 150));
-
-    let (nx, ny, moved) = clamp_rect_to_screen(&win, pos.x, pos.y, w, h);
+        .unwrap_or(FALLBACK_SIZE);
+    let (nx, ny, moved) = clamp_rect_to_screen(win, pos.x, pos.y, w, h);
     if moved {
         let _ = win.set_position(PhysicalPosition::new(nx, ny));
-        config::save_widget_pos(app, service, nx, ny);
+        Some((nx, ny))
+    } else {
+        None
     }
 }
 
-/// Persist a service widget's current on-screen position. Windows parks a minimizing/hiding
-/// window at the (-32000,-32000) sentinel while still reporting is_visible()==true, so also
-/// require the window not be minimized and reject the sentinel - otherwise that bogus position
-/// gets saved and the widget returns off-screen (invisible) on the next launch.
-pub fn save_widget_pos(app: &AppHandle, service: &str) {
+/// Ensure a service's own widget is fully inside screen bounds.
+pub fn ensure_widget_on_screen(app: &AppHandle, service: &str) {
     if let Some(win) = app.get_webview_window(&widget_label(service)) {
-        if matches!(win.is_visible(), Ok(true)) && !matches!(win.is_minimized(), Ok(true)) {
-            if let Ok(pos) = win.outer_position() {
-                if pos.x > -32000 && pos.y > -32000 {
-                    config::save_widget_pos(app, service, pos.x, pos.y);
-                }
-            }
+        if let Some((x, y)) = ensure_on_screen(&win) {
+            config::save_widget_pos(app, service, x, y);
         }
     }
 }
 
-/// Flush every service widget's position to disk before the process exits or restarts. Called
+/// Ensure the docked group window is fully inside screen bounds.
+pub fn ensure_dock_on_screen(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(DOCK_LABEL) {
+        if let Some((x, y)) = ensure_on_screen(&win) {
+            config::save_dock_anchor(app, x, y);
+        }
+    }
+}
+
+/// A window's current on-screen position, if it is really on screen. Windows parks a
+/// minimizing/hiding window at the (-32000,-32000) sentinel while still reporting
+/// is_visible()==true, so also require the window not be minimized and reject the sentinel -
+/// otherwise that bogus position gets saved and the window returns off-screen (invisible) on
+/// the next launch.
+fn on_screen_position(win: &tauri::WebviewWindow) -> Option<(i32, i32)> {
+    if !matches!(win.is_visible(), Ok(true)) || matches!(win.is_minimized(), Ok(true)) {
+        return None;
+    }
+    let pos = win.outer_position().ok()?;
+    (pos.x > -32000 && pos.y > -32000).then_some((pos.x, pos.y))
+}
+
+/// Persist a service widget's current on-screen position.
+pub fn save_widget_pos(app: &AppHandle, service: &str) {
+    if let Some(win) = app.get_webview_window(&widget_label(service)) {
+        if let Some((x, y)) = on_screen_position(&win) {
+            config::save_widget_pos(app, service, x, y);
+        }
+    }
+}
+
+/// Persist the docked group window's current on-screen position.
+pub fn save_dock_pos(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(DOCK_LABEL) {
+        if let Some((x, y)) = on_screen_position(&win) {
+            config::save_dock_anchor(app, x, y);
+        }
+    }
+}
+
+/// Flush every widget window's position to disk before the process exits or restarts. Called
 /// by both `quit_app` and the updater's install-then-restart path so an update never drops a
 /// widget's on-screen position: the updater hides the window during teardown, which would
 /// otherwise leave the last position unsaved and bring the widget back at its default corner.
@@ -321,6 +402,7 @@ pub fn persist_widgets_before_exit(app: &AppHandle) {
     for svc in widget_services(app) {
         save_widget_pos(app, &svc);
     }
+    save_dock_pos(app);
 }
 
 /// Desired visibility of a service's widget (defaults to shown).
@@ -330,87 +412,104 @@ fn widget_should_show(app: &AppHandle, service: &str) -> bool {
         .unwrap_or(true)
 }
 
-/// Persist a service widget's desired visibility (so a restart and the watchdog honor it).
-fn set_widget_visible(app: &AppHandle, service: &str, visible: bool) {
+/// Persist the desired visibility of one or more service widgets (so a restart and the
+/// watchdog honor it) and broadcast the change once. Broadcasting matters: an open
+/// Settings/Style window otherwise keeps a stale value that its next save would round-trip
+/// back, reverting this show/hide (which reconcile would then re-enforce).
+fn set_widgets_visible(app: &AppHandle, services: &[String], visible: bool) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
     let snap = {
         let mut s = state.settings.lock().unwrap();
-        let mut wc = s.widget(service);
-        if wc.visible == visible {
+        let mut changed = false;
+        for svc in services {
+            let mut wc = s.widget(svc);
+            if wc.visible != visible {
+                wc.visible = visible;
+                s.widgets.insert(svc.clone(), wc);
+                changed = true;
+            }
+        }
+        if !changed {
             return;
         }
-        wc.visible = visible;
-        s.widgets.insert(service.to_string(), wc);
         s.clone()
     };
     let _ = config::save(app, &snap);
-    // Broadcast like the other widget-control commands so an open Settings/Style window keeps a
-    // current value; otherwise its next save would round-trip a stale value and revert this
-    // show/hide (which reconcile would then re-enforce).
     let _ = app.emit("settings://changed", &snap);
 }
 
-/// Set a service widget's visibility from the UI (Widget Style window): persist the choice and
-/// show/hide the existing window immediately. Window creation is left to `show_widget` / the
-/// watchdog (avoids off-main-thread window builds); a logged-in service already has its window.
-pub fn apply_widget_visible(app: &AppHandle, service: &str, visible: bool) {
-    set_widget_visible(app, service, visible);
-    if let Some(win) = app.get_webview_window(&widget_label(service)) {
-        if visible {
-            if !matches!(win.is_visible(), Ok(true)) {
-                place_widget(app, &win, service);
-            }
+/// Show a service's own widget window (placing it and applying its layering when it was
+/// hidden) or hide it (remembering where it was), per `show`. Window creation is left to the
+/// callers, which all run on the main thread.
+fn set_service_window_shown(app: &AppHandle, service: &str, show: bool) {
+    let Some(win) = app.get_webview_window(&widget_label(service)) else {
+        return;
+    };
+    let visible = matches!(win.is_visible(), Ok(true));
+    if show {
+        if !visible {
+            place_widget(app, &win, service);
+            let aot = app
+                .try_state::<AppState>()
+                .map(|s| s.settings.lock().unwrap().widget(service).always_on_top)
+                .unwrap_or(true);
+            apply_layering(&win, aot);
             let _ = win.show();
-        } else {
-            save_widget_pos(app, service);
-            let _ = win.hide();
         }
+    } else if visible {
+        save_widget_pos(app, service);
+        let _ = win.hide();
     }
-    // Hiding/showing a docked member changes who `pack()` sees, so the rest of the group
-    // needs to re-flow around the gap (or make room again).
-    crate::dock::apply_layout(app);
-    crate::widget_size::recompute(app);
+}
+
+/// Same for the docked group window. Creates it on first show.
+fn set_dock_window_shown(app: &AppHandle, show: bool) {
+    if show {
+        create_dock_window(app);
+    }
+    let Some(win) = app.get_webview_window(DOCK_LABEL) else {
+        return;
+    };
+    let visible = matches!(win.is_visible(), Ok(true));
+    if show {
+        if !visible {
+            place_dock_window(app, &win);
+            let aot = app
+                .try_state::<AppState>()
+                .map(|s| s.settings.lock().unwrap().dock.always_on_top)
+                .unwrap_or(true);
+            apply_layering(&win, aot);
+            let _ = win.show();
+        }
+    } else if visible {
+        save_dock_pos(app);
+        let _ = win.hide();
+    }
+}
+
+/// Set a service widget's visibility from the UI (Widget Style window): persist the choice
+/// and bring the windows in line right away. For a docked member this changes which cells
+/// the group window shows (and hides the group when nothing is left).
+pub fn apply_widget_visible(app: &AppHandle, service: &str, visible: bool) {
+    set_widgets_visible(app, &[service.to_string()], visible);
+    reconcile_widget_visibility(app);
 }
 
 /// Hide a dynamically-created service widget after its session is removed or expires. The
 /// persisted visibility preference remains unchanged so the widget returns automatically after
-/// the next successful login.
+/// the next successful login. The docked window drops the service on the next reconcile.
 pub fn hide_runtime_widget(app: &AppHandle, service: &str) {
     if service == crate::service::CLAUDE {
         return;
     }
-    if let Some(state) = app.try_state::<AppState>() {
-        state.widget_menus_open.lock().unwrap().remove(service);
-    }
-    if let Some(win) = app.get_webview_window(&widget_label(service)) {
-        save_widget_pos(app, service);
-        let _ = win.hide();
-    }
-    crate::dock::apply_layout(app);
-    crate::widget_size::recompute(app);
+    set_service_window_shown(app, service, false);
 }
 
 /// Show each service's widget on startup, unless the user had it hidden.
 pub fn show_widget(app: &AppHandle) {
-    for svc in widget_services(app) {
-        if svc != "claude" {
-            create_widget_window(app, &svc);
-        }
-        crate::dock::on_membership_changed(app, &svc);
-        if !widget_should_show(app, &svc) {
-            continue;
-        }
-        if let Some(win) = app.get_webview_window(&widget_label(&svc)) {
-            if !matches!(win.is_visible(), Ok(true)) {
-                place_widget(app, &win, &svc);
-            }
-            let _ = win.show();
-        }
-    }
-    crate::dock::apply_layout(app);
-    crate::widget_size::recompute(app);
+    reconcile_widget_visibility(app);
     // Re-push settings right after showing, in case a widget's own startup `getSettings()`
     // call raced ahead of `AppState` being managed (the static "widget" window's webview can
     // begin executing JS before `setup()` finishes) and so applied stale/default values. This
@@ -422,70 +521,86 @@ pub fn show_widget(app: &AppHandle) {
     }
 }
 
-/// Show or hide all service widgets together (tray left-click): show all if any is hidden,
-/// otherwise hide all. Persists each widget's choice and position.
+/// The window a service's widget lives in: its own, or the docked group's.
+fn widget_window_for(app: &AppHandle, service: &str) -> Option<tauri::WebviewWindow> {
+    if crate::dock::is_docked(app, service) {
+        app.get_webview_window(DOCK_LABEL)
+    } else {
+        app.get_webview_window(&widget_label(service))
+    }
+}
+
+/// Show or hide all service widgets together (tray left-click): show all if any is hidden or
+/// minimized, otherwise hide all. Persists each widget's choice and position.
 pub fn toggle_widget(app: &AppHandle) {
     let services = widget_services(app);
-    let any_hidden = services.iter().any(|svc| {
-        app.get_webview_window(&widget_label(svc))
-            .map(|w| !matches!(w.is_visible(), Ok(true)))
-            .unwrap_or(true)
-    });
     for svc in &services {
         if svc != "claude" {
             create_widget_window(app, svc);
         }
         crate::dock::on_membership_changed(app, svc);
-        if let Some(win) = app.get_webview_window(&widget_label(svc)) {
-            if any_hidden {
-                place_widget(app, &win, svc);
-                let _ = win.show();
-                let _ = win.set_focus();
-            } else {
-                save_widget_pos(app, svc);
-                let _ = win.hide();
+    }
+    let any_hidden = services.iter().any(|svc| {
+        if !widget_should_show(app, svc) {
+            return true;
+        }
+        widget_window_for(app, svc)
+            .map(|w| !matches!(w.is_visible(), Ok(true)) || matches!(w.is_minimized(), Ok(true)))
+            .unwrap_or(true)
+    });
+    set_widgets_visible(app, &services, any_hidden);
+    reconcile_widget_visibility(app);
+    if any_hidden {
+        // Bring the (re)shown windows forward. A widget shown in the taskbar can have been
+        // minimized from there, which reconcile deliberately leaves alone; an explicit tray
+        // click is the user asking for it back.
+        let mut raised: Vec<String> = Vec::new();
+        for svc in &services {
+            let Some(win) = widget_window_for(app, svc) else {
+                continue;
+            };
+            if raised.iter().any(|l| l == win.label()) {
+                continue;
             }
-            set_widget_visible(app, svc, any_hidden);
+            raised.push(win.label().to_string());
+            let _ = win.unminimize();
+            let _ = win.set_focus();
         }
     }
-    crate::dock::apply_layout(app);
-    crate::widget_size::recompute(app);
 }
 
-/// Keep each service widget's actual state in sync with its desired visibility, recovering if
-/// it drifted (hidden when it should show, or pushed off-screen). Called each poll cycle.
+/// Bring every widget window into line with what the settings say: each service either has
+/// its own window shown, is a cell in the docked group window, or is hidden. Also recovers a
+/// window that drifted (off-screen, or hidden when it should show), and hides the runtime
+/// widget of a service that signed out. Called on startup, after every visibility/docking
+/// change, and each poll cycle as a watchdog. Must run on the main thread (creates windows).
 pub fn reconcile_widget_visibility(app: &AppHandle) {
-    let active_services = widget_services(app);
+    let active = widget_services(app);
     for &svc in crate::service::all() {
-        if svc != crate::service::CLAUDE && !active_services.iter().any(|id| id == svc) {
+        if svc != crate::service::CLAUDE && !active.iter().any(|id| id == svc) {
             hide_runtime_widget(app, svc);
         }
     }
-    for svc in active_services {
+    for svc in &active {
         if svc != "claude" {
-            create_widget_window(app, &svc);
+            create_widget_window(app, svc);
         }
         // A service signed into while the app is already running (Codex, say) first shows up
-        // here, not in `show_widget`/`toggle_widget` - so this is where it has to be offered
-        // to the dock. Without it, a new provider's widget stayed outside the docked group
-        // until the next full restart re-ran `show_widget`.
-        crate::dock::on_membership_changed(app, &svc);
-        let Some(win) = app.get_webview_window(&widget_label(&svc)) else {
-            continue;
-        };
-        if widget_should_show(app, &svc) {
-            if !matches!(win.is_visible(), Ok(true)) {
-                place_widget(app, &win, &svc);
-                let _ = win.show();
-            } else {
-                ensure_widget_on_screen(app, &svc);
-            }
-        } else if matches!(win.is_visible(), Ok(true)) {
-            let _ = win.hide();
+        // here, so this is where it has to be offered to the dock.
+        crate::dock::on_membership_changed(app, svc);
+    }
+    for svc in &active {
+        let own_window = !crate::dock::is_docked(app, svc) && widget_should_show(app, svc);
+        set_service_window_shown(app, svc, own_window);
+        if own_window {
+            ensure_widget_on_screen(app, svc);
         }
     }
-    crate::dock::apply_layout(app);
-    crate::widget_size::recompute(app);
+    let members = crate::dock::sync(app, &active);
+    set_dock_window_shown(app, !members.is_empty());
+    if !members.is_empty() {
+        ensure_dock_on_screen(app);
+    }
 }
 
 /// Position and show the custom context menu near the tray click point.

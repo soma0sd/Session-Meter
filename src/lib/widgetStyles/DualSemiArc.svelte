@@ -13,6 +13,7 @@
     secondaryResetMs,
     primaryLabel,
     secondaryLabel,
+    extra,
   }: WidgetStyleProps = $props();
 
   const pShown = $derived(shownPct(primaryPct, displayMode));
@@ -45,6 +46,9 @@
       <span class="sp">{pShown}%</span>
       {#if hasSecondary}
         <span class="ss">{sShown}%</span>
+      {/if}
+      {#if extra}
+        <div class="extra">{@render extra()}</div>
       {/if}
     </div>
   {/if}
@@ -126,5 +130,8 @@
     line-height: 1;
     color: rgb(var(--m2));
     font-variant-numeric: tabular-nums;
+  }
+  .extra {
+    margin-top: 2px;
   }
 </style>
