@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.4.0] - 2026-10-05
+
+### Fixed
+
+- **Codex sign-in immediately returning to signed out**: validate Codex usage with the token
+  already obtained by the authenticated browser instead of replaying the session cookie through
+  a separate HTTP client that can receive a Cloudflare challenge. Tokens stay in memory; only
+  the encrypted browser cookie is persisted.
+- **Codex session refresh**: when session refresh requires browser verification, restore the
+  saved cookie in a hidden, isolated WebView2 helper. Browser challenges and transport failures
+  preserve the signed-in state; only confirmed authentication expiry signs the account out.
+
 ## [1.3.0] - 2026-09-21
 
 ### Changed

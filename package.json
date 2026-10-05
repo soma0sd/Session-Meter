@@ -1,6 +1,6 @@
 {
   "name": "sessionmeter",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Claude, Codex, Gemini, and Antigravity usage tray, widget, and stats for the desktop",
   "type": "module",
   "license": "MIT",
@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test:codex": "node scripts/test-codex-login.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.conf.dev.json"
   },
