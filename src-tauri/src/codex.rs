@@ -7,7 +7,7 @@
 //! `primary_window` and `secondary_window` names describe roles, not durations, so their
 //! `limit_window_seconds` value decides which window is which.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -41,6 +41,7 @@ const SESSION_KEY: &str = "codex-5h";
 const WEEKLY_KEY: &str = "codex-weekly";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(295);
 const LOGIN_RESULT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const SESSION_TIMEOUT: Duration = Duration::from_secs(35);
 
 // A Codex sign-in owns a disposable WebView2 profile. Do not allow two helpers to touch it or
 // present duplicate login windows at the same time.
@@ -56,6 +57,11 @@ struct CodexSession {
     cookie: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     user_agent: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BrowserSessionResult {
+    session: Value,
 }
 
 struct SessionCredentials {
@@ -222,10 +228,32 @@ pub async fn fetch_usage(
 ) -> Result<UsageSnapshot, AppError> {
     let session = CodexSession::decode(cookie_or_session)?;
     let credentials = fetch_session_credentials(client, &session).await?;
+    fetch_usage_with_credentials(client, &session, credentials).await
+}
 
+async fn fetch_usage_with_credentials(
+    client: &reqwest::Client,
+    session: &CodexSession,
+    credentials: SessionCredentials,
+) -> Result<UsageSnapshot, AppError> {
+    let resp = usage_request(client, session, &credentials).send().await?;
+    ensure_response_success(&resp)?;
+    let raw = resp
+        .json::<Value>()
+        .await
+        .map_err(|e| AppError::Parse(e.to_string()))?;
+    parse_usage(&raw)
+}
+
+fn usage_request(
+    client: &reqwest::Client,
+    session: &CodexSession,
+    credentials: &SessionCredentials,
+) -> reqwest::RequestBuilder {
+    // WHAM authenticates with the bearer token. Replaying browser cookies here can trigger a
+    // separate browser challenge and turn a valid token into an unusable request.
     let mut request = client
         .get(USAGE_URL)
-        .header(reqwest::header::COOKIE, &session.cookie)
         .header(
             reqwest::header::AUTHORIZATION,
             format!("Bearer {}", credentials.access_token),
@@ -243,13 +271,7 @@ pub async fn fetch_usage(
     if let Some(user_agent) = session.user_agent.as_deref() {
         request = request.header(reqwest::header::USER_AGENT, user_agent);
     }
-    let resp = request.send().await?;
-    ensure_success(resp.status().as_u16())?;
-    let raw = resp
-        .json::<Value>()
-        .await
-        .map_err(|e| AppError::Parse(e.to_string()))?;
-    parse_usage(&raw)
+    request
 }
 
 async fn fetch_session_credentials(
@@ -266,7 +288,16 @@ async fn fetch_session_credentials(
         request = request.header(reqwest::header::USER_AGENT, user_agent);
     }
     let resp = request.send().await?;
-    ensure_success(resp.status().as_u16())?;
+    // A Cloudflare browser challenge is a transport restriction, not proof that the cookie
+    // expired. Recheck in a disposable browser with the same encrypted cookie instead.
+    if response_requires_browser(&resp) {
+        eprintln!("[cg] Codex session requires browser verification");
+        let session = session.clone();
+        return tauri::async_runtime::spawn_blocking(move || fetch_browser_credentials(&session))
+            .await
+            .map_err(|_| AppError::Http("Codex browser verification failed".to_string()))?;
+    }
+    ensure_response_success(&resp)?;
     let raw = resp
         .json::<Value>()
         .await
@@ -484,7 +515,7 @@ pub fn start_login(app: &AppHandle) {
         };
         // The helper is reaped by `read_result` before this directory is removed. The profile is
         // intentionally temporary because the encrypted session file is the sole persisted copy.
-        let _ = std::fs::remove_dir_all(&profile);
+        cleanup_helper_profile(&profile);
 
         let Some(session) = result.as_deref().and_then(helper_session) else {
             if login_is_current(epoch) && !matches!(result.as_deref(), Some("CANCELLED")) {
@@ -495,6 +526,19 @@ pub fn start_login(app: &AppHandle) {
         let serialized_session = match session.encode() {
             Ok(value) => value,
             Err(_) => {
+                if login_is_current(epoch) {
+                    crate::usage::mark_status(&app, crate::service::CODEX, "error");
+                }
+                return;
+            }
+        };
+
+        // The helper already read the session in the authenticated browser. Use that token
+        // only in memory: replaying the cookie through /api/auth/session can be challenged
+        // immediately even though the browser just completed sign-in.
+        let credentials = match result.as_deref().and_then(helper_credentials) {
+            Some(Ok(credentials)) => credentials,
+            _ => {
                 if login_is_current(epoch) {
                     crate::usage::mark_status(&app, crate::service::CODEX, "error");
                 }
@@ -515,21 +559,25 @@ pub fn start_login(app: &AppHandle) {
             }
             return;
         };
-        let snapshot =
-            match tauri::async_runtime::block_on(fetch_usage(&client, &serialized_session)) {
-                Ok(snapshot) => snapshot,
-                Err(error) => {
-                    let status = if matches!(error, AppError::Unauthorized) {
-                        "unauthorized"
-                    } else {
-                        "error"
-                    };
-                    if login_is_current(epoch) {
-                        crate::usage::mark_status(&app, crate::service::CODEX, status);
-                    }
-                    return;
+        let snapshot = match tauri::async_runtime::block_on(fetch_usage_with_credentials(
+            &client,
+            &session,
+            credentials,
+        )) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                eprintln!("[cg] Codex login validation failed: {error}");
+                let status = if matches!(error, AppError::Unauthorized) {
+                    "unauthorized"
+                } else {
+                    "error"
+                };
+                if login_is_current(epoch) {
+                    crate::usage::mark_status(&app, crate::service::CODEX, status);
                 }
-            };
+                return;
+            }
+        };
 
         // Serialize persistence and UI transition with logout. A late helper result must never
         // restore a session that the user explicitly removed while the login was open.
@@ -595,6 +643,18 @@ fn helper_profile_dir() -> PathBuf {
         "sessionmeter-codex-login-{}-{nonce}",
         std::process::id()
     ))
+}
+
+fn cleanup_helper_profile(profile: &Path) {
+    // WebView2 browser subprocesses can briefly hold files after the host exits.
+    for _ in 0..10 {
+        match std::fs::remove_dir_all(profile) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    eprintln!("[cg] Codex temporary browser profile cleanup failed");
 }
 
 /// Spawn the same executable in its bare tao+wry helper mode. Explicitly remove the Gemini-only
@@ -671,7 +731,82 @@ fn helper_session(payload: &str) -> Option<CodexSession> {
     CodexSession::decode(serialized).ok()
 }
 
-fn ensure_success(code: u16) -> Result<(), AppError> {
+fn helper_credentials(payload: &str) -> Option<Result<SessionCredentials, AppError>> {
+    let serialized = payload
+        .strip_prefix("COOKIE ")
+        .or_else(|| payload.strip_prefix("SESSION "))?;
+    let result = serde_json::from_str::<BrowserSessionResult>(serialized).ok()?;
+    Some(parse_session_credentials(&result.session))
+}
+
+fn fetch_browser_credentials(session: &CodexSession) -> Result<SessionCredentials, AppError> {
+    let profile = helper_profile_dir();
+    std::fs::create_dir_all(&profile)
+        .map_err(|_| AppError::Http("Codex browser profile unavailable".to_string()))?;
+    let result = (|| {
+        let mut child = Command::new(
+            std::env::current_exe().map_err(|error| AppError::Http(error.to_string()))?,
+        )
+        .env("SM_CODEX_MODE", "session")
+        .env("SM_CODEX_UDF", &profile)
+        .env_remove("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| AppError::Http("Codex browser helper unavailable".to_string()))?;
+        // Credentials travel over the private pipe, never command-line arguments or env vars.
+        let input = child.stdin.take().and_then(|mut stdin| {
+            session
+                .encode()
+                .ok()
+                .and_then(|value| writeln!(stdin, "{value}").ok())
+        });
+        if input.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(AppError::Http(
+                "Codex browser session transfer failed".to_string(),
+            ));
+        }
+        let epoch = CODEX_LOGIN_EPOCH.load(Ordering::SeqCst);
+        let result = read_result(&mut child, SESSION_TIMEOUT, epoch)
+            .ok_or_else(|| AppError::Http("Codex browser verification timed out".to_string()))?;
+        helper_credentials(&result).unwrap_or_else(|| {
+            Err(AppError::Http(
+                "Codex browser verification unavailable".to_string(),
+            ))
+        })
+    })();
+    cleanup_helper_profile(&profile);
+    result
+}
+
+fn response_requires_browser(response: &reqwest::Response) -> bool {
+    is_browser_challenge(response.status().as_u16(), response.headers())
+}
+
+fn is_browser_challenge(code: u16, headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get("cf-mitigated")
+        .is_some_and(|value| value == "challenge")
+        || (code == 403
+            && headers
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.to_ascii_lowercase().starts_with("text/html")))
+}
+
+fn ensure_response_success(response: &reqwest::Response) -> Result<(), AppError> {
+    ensure_success(response.status().as_u16(), response.headers())
+}
+
+fn ensure_success(code: u16, headers: &reqwest::header::HeaderMap) -> Result<(), AppError> {
+    if is_browser_challenge(code, headers) {
+        return Err(AppError::Http(
+            "Codex browser verification required".to_string(),
+        ));
+    }
     match code {
         200..=299 => Ok(()),
         401 | 403 => Err(AppError::Unauthorized),
@@ -780,10 +915,86 @@ mod tests {
 
     #[test]
     fn maps_auth_statuses_to_session_expiry() {
-        assert!(matches!(ensure_success(401), Err(AppError::Unauthorized)));
-        assert!(matches!(ensure_success(403), Err(AppError::Unauthorized)));
-        assert!(matches!(ensure_success(500), Err(AppError::Http(_))));
-        assert!(ensure_success(200).is_ok());
+        let headers = reqwest::header::HeaderMap::new();
+        assert!(matches!(
+            ensure_success(401, &headers),
+            Err(AppError::Unauthorized)
+        ));
+        assert!(matches!(
+            ensure_success(403, &headers),
+            Err(AppError::Unauthorized)
+        ));
+        assert!(matches!(
+            ensure_success(500, &headers),
+            Err(AppError::Http(_))
+        ));
+        assert!(ensure_success(200, &headers).is_ok());
+    }
+
+    #[test]
+    fn browser_challenges_preserve_the_stored_session() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("cf-mitigated", "challenge".parse().unwrap());
+        for code in [200, 401, 403, 503] {
+            assert!(matches!(
+                ensure_success(code, &headers),
+                Err(AppError::Http(_))
+            ));
+        }
+        headers.remove("cf-mitigated");
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "text/html; charset=UTF-8".parse().unwrap(),
+        );
+        assert!(matches!(
+            ensure_success(403, &headers),
+            Err(AppError::Http(_))
+        ));
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+        assert!(matches!(
+            ensure_success(403, &headers),
+            Err(AppError::Unauthorized)
+        ));
+    }
+
+    #[test]
+    fn browser_tokens_are_used_without_being_persisted() {
+        let result = r#"COOKIE {"cookie":"session=value","user_agent":"Browser UA","session":{"accessToken":"memory-only-token","accountId":"workspace-123"}}"#;
+        let credentials = helper_credentials(result).unwrap().unwrap();
+        assert_eq!(credentials.access_token, "memory-only-token");
+        assert_eq!(credentials.account_id.as_deref(), Some("workspace-123"));
+        let persisted = helper_session(result).unwrap().encode().unwrap();
+        assert!(!persisted.contains("memory-only-token"));
+        assert!(!persisted.contains("accessToken"));
+        assert!(matches!(
+            helper_credentials(r#"SESSION {"session":{}}"#).unwrap(),
+            Err(AppError::Unauthorized)
+        ));
+        assert!(helper_credentials("ERROR browser verification unavailable").is_none());
+    }
+
+    #[test]
+    fn usage_authentication_does_not_replay_browser_cookies() {
+        let session = CodexSession {
+            cookie: "session=private-browser-cookie".to_string(),
+            user_agent: Some("Browser UA".to_string()),
+        };
+        let credentials = SessionCredentials {
+            access_token: "memory-only-token".to_string(),
+            account_id: Some("workspace-123".to_string()),
+        };
+        let request = usage_request(&reqwest::Client::new(), &session, &credentials)
+            .build()
+            .unwrap();
+        assert!(!request.headers().contains_key(reqwest::header::COOKIE));
+        assert_eq!(
+            request.headers()[reqwest::header::AUTHORIZATION],
+            "Bearer memory-only-token"
+        );
+        assert_eq!(request.headers()["ChatGPT-Account-ID"], "workspace-123");
     }
 
     #[test]

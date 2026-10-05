@@ -2,14 +2,17 @@
 //!
 //! chatgpt.com sign-in runs in this disposable process so a stalled WebView2 page cannot block
 //! the main application's shared UI thread. The helper retains WebView2's normal browser identity.
-//! Once its in-page session endpoint exposes an OAuth token, it reads the chatgpt.com cookies once
-//! and returns them to the parent over stdout. The parent independently validates the cookie with
-//! a fresh OAuth bearer request before saving it.
+//! Once its in-page session endpoint exposes an OAuth token, it returns the token and cookies
+//! through the parent's private pipe. The parent validates quota with the token in memory and
+//! persists only the encrypted cookie. Hidden session mode restores that cookie in a disposable
+//! browser when a later HTTP refresh encounters a browser challenge.
 
+use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::WindowBuilder;
@@ -30,11 +33,11 @@ const COOKIE_URL: &str = "https://chatgpt.com";
 const COOKIE_CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
 // This runs in the authenticated top-level chatgpt.com document. `/api/auth/session` can return
-// 200 before sign-in, so a non-empty access token is the actual completion signal. The parent
-// later revalidates the returned cookie against WHAM with bearer authentication before saving it.
+// 200 before sign-in, so a non-empty access token is the actual completion signal.
 const LOGIN_JS: &str = r#"(function(){
   function post(m){ try{ window.ipc.postMessage(m); }catch(_){} }
-  var finished=false, pending=false, timer=0;
+  var finished=false, pending=false, timer=0, sessionOnly=__SM_SESSION_ONLY__;
+  function finish(m){finished=true;clearInterval(timer);post(JSON.stringify(m));}
   async function probe(){
     if(finished||pending||window.top!==window||location.origin!=="https://chatgpt.com") return;
     pending=true;
@@ -46,13 +49,24 @@ const LOGIN_JS: &str = r#"(function(){
         headers:{"Accept":"application/json"},
         signal:controller.signal
       });
-      if(!response.ok) return;
+      var challenge=response.headers.get("cf-mitigated")==="challenge";
+      if(challenge||!response.ok){
+        if(sessionOnly){
+          if(!challenge&&response.status===401) finish({type:"SESSION_SIGNED_OUT"});
+          else finish({type:"SESSION_ERROR"});
+        }
+        return;
+      }
       var session=await response.json();
       var token=typeof session.accessToken==="string" ? session.accessToken : session.access_token;
       if(typeof token==="string"&&token.length>0){
-        finished=true;
-        clearInterval(timer);
-        post(JSON.stringify({type:"SESSION_READY",userAgent:navigator.userAgent}));
+        finish({type:"SESSION_READY",userAgent:navigator.userAgent,session:session});
+      } else if(sessionOnly){
+        var signedOut=session&&typeof session==="object"&&(
+          Object.keys(session).length===0||session.user===null||
+          Object.prototype.hasOwnProperty.call(session,"WARNING_BANNER")||
+          [session.warning,session.error,session.code,session.error&&session.error.code].indexOf("WARNING_BANNER")!==-1);
+        finish({type:signedOut?"SESSION_SIGNED_OUT":"SESSION_ERROR"});
       }
     } catch(_) {
     } finally {
@@ -78,6 +92,8 @@ struct IpcMessage {
     kind: String,
     #[serde(rename = "userAgent", default)]
     user_agent: String,
+    #[serde(default)]
+    session: Value,
 }
 
 #[derive(Serialize)]
@@ -85,11 +101,19 @@ struct CookiePayload {
     cookie: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     user_agent: Option<String>,
+    session: Value,
+}
+
+#[derive(Deserialize)]
+struct SessionInput {
+    cookie: String,
+    #[serde(default)]
+    user_agent: Option<String>,
 }
 
 /// Entry point for the isolated Codex login process. Prints one `SM_RESULT` line for the parent.
 pub fn run(mode: &str) {
-    if mode != "login" {
+    if !matches!(mode, "login" | "session") {
         emit("ERROR unsupported mode");
         return;
     }
@@ -98,10 +122,30 @@ pub fn run(mode: &str) {
         return;
     };
 
+    let is_login = mode == "login";
+    let input = if is_login {
+        None
+    } else {
+        let mut line = String::new();
+        let parsed = std::io::stdin()
+            .lock()
+            .read_line(&mut line)
+            .ok()
+            .and_then(|_| serde_json::from_str::<SessionInput>(&line).ok());
+        let Some(input) = parsed
+            .filter(|input| !input.cookie.is_empty() && header_component_is_safe(&input.cookie))
+        else {
+            emit("ERROR invalid session input");
+            return;
+        };
+        Some(input)
+    };
+
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let window = match WindowBuilder::new()
         .with_title("Sign in to Codex")
+        .with_visible(is_login)
         .with_inner_size(tao::dpi::LogicalSize::new(520.0, 760.0))
         .build(&event_loop)
     {
@@ -114,9 +158,13 @@ pub fn run(mode: &str) {
 
     let mut web_context = WebContext::new(Some(udf));
     let ipc_proxy = proxy.clone();
-    let webview = match WebViewBuilder::new_with_web_context(&mut web_context)
-        .with_url(LOGIN_URL)
-        .with_initialization_script(LOGIN_JS)
+    let script = LOGIN_JS.replace(
+        "__SM_SESSION_ONLY__",
+        if is_login { "false" } else { "true" },
+    );
+    let mut builder = WebViewBuilder::new_with_web_context(&mut web_context)
+        .with_url(if is_login { LOGIN_URL } else { "about:blank" })
+        .with_initialization_script(&script)
         .with_ipc_handler(move |req: wry::http::Request<String>| {
             // The init script is injected into subframes too. Only a top-level chatgpt.com
             // document may ask this helper to capture an authenticated cookie.
@@ -125,9 +173,15 @@ pub fn run(mode: &str) {
             if trusted_source {
                 let _ = ipc_proxy.send_event(Msg::Ipc(req.into_body()));
             }
-        })
-        .build(&window)
+        });
+    if let Some(agent) = input
+        .as_ref()
+        .and_then(|input| input.user_agent.as_deref())
+        .filter(|agent| is_safe_user_agent(agent))
     {
+        builder = builder.with_user_agent(agent);
+    }
+    let webview = match builder.build(&window) {
         Ok(webview) => webview,
         Err(error) => {
             emit(&format!("ERROR webview {error}"));
@@ -135,21 +189,68 @@ pub fn run(mode: &str) {
         }
     };
 
+    if let Some(input) = input {
+        // Restore only chatgpt.com cookies. Navigation starts after the browser cookie store
+        // is populated, so /api/auth/session sees the authenticated session on its first probe.
+        for pair in input.cookie.split(';') {
+            let Some((name, value)) = pair.trim().split_once('=') else {
+                continue;
+            };
+            if name.is_empty() || name.contains([' ', '\t', '=']) {
+                continue;
+            }
+            let cookie = wry::cookie::Cookie::build((name.to_string(), value.to_string()))
+                .domain(".chatgpt.com")
+                .path("/")
+                .secure(true)
+                .http_only(true)
+                .build();
+            if webview.set_cookie(&cookie).is_err() {
+                emit("ERROR session restore failed");
+                return;
+            }
+        }
+        if webview.load_url(COOKIE_URL).is_err() {
+            emit("ERROR session navigation failed");
+            return;
+        }
+    }
+
     let timeout_proxy = proxy.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(290));
+        std::thread::sleep(Duration::from_secs(if is_login { 290 } else { 30 }));
         let _ = timeout_proxy.send_event(Msg::Timeout);
     });
 
     let mut cookie_capture_pending = false;
     let mut cookie_user_agent = None;
+    let mut browser_session = Value::Null;
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
             Event::UserEvent(Msg::Ipc(body)) if !cookie_capture_pending => {
+                if !is_login {
+                    let Ok(message) = serde_json::from_str::<IpcMessage>(&body) else {
+                        return;
+                    };
+                    match message.kind.as_str() {
+                        "SESSION_READY" => emit(&format!(
+                            "SESSION {}",
+                            serde_json::json!({"session":message.session})
+                        )),
+                        "SESSION_SIGNED_OUT" => emit("SESSION {\"session\":{}}"),
+                        "SESSION_ERROR" => emit("ERROR browser verification unavailable"),
+                        _ => return,
+                    }
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
                 let Some(user_agent) = session_ready_user_agent(&body) else {
                     return;
                 };
+                browser_session = serde_json::from_str::<IpcMessage>(&body)
+                    .map(|message| message.session)
+                    .unwrap_or(Value::Null);
                 cookie_capture_pending = true;
                 cookie_user_agent = user_agent;
                 if let Err(error) = begin_cookie_capture(&webview, proxy.clone()) {
@@ -165,7 +266,9 @@ pub fn run(mode: &str) {
             }
             Event::UserEvent(Msg::Cookies(result)) if cookie_capture_pending => {
                 match result {
-                    Ok(Some(cookie)) => emit_cookie(cookie, cookie_user_agent.take()),
+                    Ok(Some(cookie)) => {
+                        emit_cookie(cookie, cookie_user_agent.take(), browser_session.take())
+                    }
                     Ok(None) => emit("ERROR cookies unavailable"),
                     Err(error) => emit(&format!("ERROR cookies unavailable: {error}")),
                 }
@@ -295,8 +398,12 @@ fn emit(payload: &str) {
     let _ = out.flush();
 }
 
-fn emit_cookie(cookie: String, user_agent: Option<String>) {
-    let payload = CookiePayload { cookie, user_agent };
+fn emit_cookie(cookie: String, user_agent: Option<String>, session: Value) {
+    let payload = CookiePayload {
+        cookie,
+        user_agent,
+        session,
+    };
     match serde_json::to_string(&payload) {
         Ok(serialized) => emit(&format!("COOKIE {serialized}")),
         Err(_) => emit("ERROR cookie payload encoding failed"),
