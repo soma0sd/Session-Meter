@@ -33,11 +33,9 @@ SessionMeter는 로그인된 본인 세션을 이용해 사용자 자신의 구�
 Claude는 기존 세션 호환을 위해 `session.dat`, Codex는 `session.codex.dat`, Gemini는
 `session.gemini.dat`를 사용합니다. Antigravity IDE는 로그인이 없어 저장되는 자격 증명도 없습니다.
 
-- **Windows에서는 저장 시 DPAPI로 암호화**(사용자 범위)되어 오프라인 디스크, 옮겨진 백업, 다른
+- **저장 시 DPAPI로 암호화**(사용자 범위)되어 오프라인 디스크, 옮겨진 백업, 다른
   사용자 계정에서 복호화할 수 없습니다.
-- **macOS/Linux**(best-effort)에서는 현재 사용자 범위 평문 파일이며 OS 시크릿 서비스 연동은
-  예정입니다.
-- 어느 플랫폼이든 로그인 상태에서 같은 사용자로 실행 중인 프로세스는 활성 세션을 읽을 수 있는데,
+- 로그인 상태에서 같은 사용자로 실행 중인 프로세스는 활성 세션을 읽을 수 있는데,
   이는 브라우저가 자체 쿠키를 보관하는 방식과 같습니다.
 
 자세한 내용은 [`README.md`](README.md)의 "보안·프라이버시"와
@@ -48,10 +46,10 @@ Claude는 기존 세션 호환을 위해 `session.dat`, Codex는 `session.codex.
 
 | 권고 | 구성 요소 | 상태 |
 | --- | --- | --- |
-| [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429) | `gtk` / `gdk` / `atk`(gtk3-rs 바인딩) | 주 대상 플랫폼에는 해당 없음 |
+| [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429) | `gtk` / `gdk` / `atk`(gtk3-rs 바인딩) | 지원 플랫폼(Windows)에는 해당 없음 |
 
 `RUSTSEC-2024-0429`는 gtk3-rs 바인딩에 대한 **정보성 "유지보수 중단"** 권고이며 메모리 안전·코드
 실행 취약점이 아닙니다. 해당 크레이트는 Linux 전용이고 Tauri의 WebKitGTK 백엔드를 통해 전이적으로만
-들어오며, **Windows 주 대상에서는 컴파일되지 않습니다.** 수정은 상류 Tauri에서 이루어지며, 해당
+들어오며, **지원 대상인 Windows에서는 컴파일되지 않습니다.** 수정은 상류 Tauri에서 이루어지며, 해당
 릴리스가 나오면 반영합니다. CI에 `cargo audit`을 추가할 경우, 이 항목은 이 문서를 참조하는 주석과
 함께 의도적으로 무시할 수 있습니다.

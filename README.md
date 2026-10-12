@@ -72,7 +72,7 @@
 
 ## 요구 사항
 
-- Windows 10/11(주 대상, macOS/Linux는 best-effort).
+- Windows 10/11(Windows 전용이며 macOS·Linux는 지원하지 않습니다).
 - [WebView2 런타임](https://developer.microsoft.com/microsoft-edge/webview2/)(최신 Windows에는 기본 포함).
 
 ## 설치
@@ -117,9 +117,8 @@ npm run tauri build    # 릴리스 빌드 + 설치 프로그램(NSIS) 생성
   `session.codex.dat`, Gemini는 `session.gemini.dat`를 사용합니다. 각 쿠키는 해당 서비스
   (`claude.ai`, `chatgpt.com`, `gemini.google.com`)로의 HTTPS 요청에만 사용되며 저장소에 커밋되거나
   프로젝트로 전송되지 않습니다.
-- **Windows에서는 저장 시 암호화됩니다.** 각 세션 파일은 Windows 데이터 보호 API(DPAPI, 사용자
+- **세션은 저장 시 암호화됩니다.** 각 세션 파일은 Windows 데이터 보호 API(DPAPI, 사용자
   범위)로 암호화되어 다른 사용자 계정·오프라인 디스크·복사된 백업에서 복호화할 수 없습니다.
-  macOS/Linux(best-effort)에서는 아직 사용자 범위 평문 파일이며 OS 시크릿 서비스 연동은 예정입니다.
   어느 경우든 로그인 상태에서 같은 사용자로 실행 중인 프로세스는 세션을 읽을 수 있는데, 이는 브라우저가
   자체 쿠키를 보관하는 방식과 같습니다. 서비스별 로그아웃하면 해당 세션 파일이 삭제됩니다.
 - **텔레메트리 없음.** 로그인·사용량 조회·업데이트 확인을 위한 서비스 및 배포 서버 통신 외에 사용
@@ -128,7 +127,6 @@ npm run tauri build    # 릴리스 빌드 + 설치 프로그램(NSIS) 생성
 
 ## 로드맵
 
-- macOS/Linux에서 저장 세션의 OS 시크릿 서비스 연동(Windows는 이미 DPAPI 암호화).
 - 공식 Admin API 패널(개발자 API 토큰 사용량·비용(USD); Admin API 키 필요).
 - 다중 계정.
 - 사용 이력 CSV 내보내기.
