@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.4.1] - 2026-10-13
+
+### Fixed
+
+- **Settings icon**: the settings button in the widget toolbar and collapsed menu showed a sun-like
+  glyph instead of a gear; it now uses a proper gear icon.
+
 ## [1.4.0] - 2026-10-05
 
 ### Fixed
