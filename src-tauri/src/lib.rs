@@ -13,6 +13,7 @@ mod history;
 mod i18n;
 mod icon;
 mod notify;
+mod placement;
 mod poller;
 mod service;
 mod state;
@@ -110,6 +111,7 @@ pub fn run() {
 
             // Poll immediately on start, then every refresh_interval_min.
             poller::start(&handle);
+            windows::start_bounds_watchdog(&handle);
 
             // Check GitHub for a newer signed release on startup and every 10 minutes; the UI
             // surfaces it via the `update://available` event (silent if offline / no release yet).
@@ -120,12 +122,12 @@ pub fn run() {
             WindowEvent::Focused(false) if window.label() == "menu" => {
                 let _ = window.hide();
             }
-            // Keep a widget window (a service's own, or the docked group's) fully on screen as
+            // Keep a widget window (a service's own, or the docked group's) inside the union of work areas as
             // the user drags it, and whenever its page resizes it to fit new content (a style
             // switch, a cell joining the docked grid) - growing near a screen edge can push it
             // partly off. Positions are persisted when the window hides or the app exits, plus
             // right here whenever the clamp had to move it.
-            WindowEvent::Moved(_) | WindowEvent::Resized(_)
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
                 if windows::is_widget_window(window.label()) =>
             {
                 // Windows parks a minimizing/hiding window at (-32000,-32000); never "correct" that.

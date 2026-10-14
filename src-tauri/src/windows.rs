@@ -265,80 +265,39 @@ fn work_rect(mon: &tauri::Monitor) -> (i32, i32, i32, i32) {
     (wa.position.x, wa.position.y, wa.size.width as i32, wa.size.height as i32)
 }
 
-/// Clamps a rectangle (x, y, w, h) so that it is fully contained inside the best-matching
-/// monitor's work area. Returns `(clamped_x, clamped_y, moved)` where `moved` is true if the
-/// rectangle was partially or fully outside and had to be adjusted.
+/// Keep a rectangle inside the union of every monitor's work area. A rectangle spanning
+/// adjacent monitors remains in place; an invalid position moves the shortest distance.
 pub fn clamp_rect_to_screen(win: &tauri::WebviewWindow, x: i32, y: i32, w: i32, h: i32) -> (i32, i32, bool) {
-    if x <= -32000 || y <= -32000 {
-        if let Ok(Some(mon)) = win.primary_monitor() {
-            let (mx, my, mw, mh) = work_rect(&mon);
-            let target_x = mx + (mw - w).max(0);
-            let target_y = my + (mh - h).max(0);
-            return (target_x, target_y, true);
-        }
-    }
-
-    let Ok(mons) = win.available_monitors() else {
+    let Ok(monitors) = win.available_monitors() else {
         return (x, y, false);
     };
-    if mons.is_empty() {
-        return (x, y, false);
-    }
-
-    let primary_mon = win.primary_monitor().ok().flatten();
-    let cx = x + w / 2;
-    let cy = y + h / 2;
-    let mon = mons
+    let areas: Vec<_> = monitors
         .iter()
-        .find(|m| {
-            let (mx, my, mw, mh) = work_rect(m);
-            cx >= mx && cy >= my && cx < mx + mw && cy < my + mh
+        .map(|monitor| {
+            let (mx, my, mw, mh) = work_rect(monitor);
+            crate::placement::Rect::new(mx, my, mw, mh)
         })
-        .or_else(|| {
-            mons.iter().max_by_key(|m| {
-                let (mx, my, mw, mh) = work_rect(m);
-                let overlap_w = (x + w).min(mx + mw) - x.max(mx);
-                let overlap_h = (y + h).min(my + mh) - y.max(my);
-                if overlap_w > 0 && overlap_h > 0 {
-                    overlap_w * overlap_h
-                } else {
-                    0
-                }
-            })
-        })
-        .or(primary_mon.as_ref())
-        .or(mons.first());
-
-    let Some(mon) = mon else {
-        return (x, y, false);
-    };
-
-    let (mx, my, mw, mh) = work_rect(mon);
-    let is_fully_contained = x >= mx && y >= my && (x + w) <= (mx + mw) && (y + h) <= (my + mh);
-
-    if is_fully_contained {
-        (x, y, false)
-    } else {
-        let clamped_x = if w >= mw { mx } else { x.clamp(mx, mx + mw - w) };
-        let clamped_y = if h >= mh { my } else { y.clamp(my, my + mh - h) };
-        (clamped_x, clamped_y, true)
-    }
+        .collect();
+    crate::placement::closest_position(&areas, x, y, w, h)
 }
 
 /// Move a visible, non-minimized window fully back inside screen bounds if any part of it is
 /// outside. Returns the corrected position when it had to move.
 fn ensure_on_screen(win: &tauri::WebviewWindow) -> Option<(i32, i32)> {
-    if matches!(win.is_minimized(), Ok(true)) {
+    if !matches!(win.is_visible(), Ok(true)) || matches!(win.is_minimized(), Ok(true)) {
         return None;
     }
     let pos = win.outer_position().ok()?;
+    if pos.x == -32000 && pos.y == -32000 {
+        return None;
+    }
     let (w, h) = win
         .outer_size()
         .map(|s| (s.width as i32, s.height as i32))
         .unwrap_or(FALLBACK_SIZE);
     let (nx, ny, moved) = clamp_rect_to_screen(win, pos.x, pos.y, w, h);
     if moved {
-        let _ = win.set_position(PhysicalPosition::new(nx, ny));
+        win.set_position(PhysicalPosition::new(nx, ny)).ok()?;
         Some((nx, ny))
     } else {
         None
@@ -361,6 +320,32 @@ pub fn ensure_dock_on_screen(app: &AppHandle) {
             config::save_dock_anchor(app, x, y);
         }
     }
+}
+
+/// Display disconnection or work-area changes need not emit a move/resize event. Recheck
+/// visible widgets independently of network polls so stranded windows recover promptly.
+pub fn start_bounds_watchdog(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                for (label, win) in handle.webview_windows() {
+                    if !is_widget_window(&label) {
+                        continue;
+                    }
+                    if let Some((x, y)) = ensure_on_screen(&win) {
+                        if label == DOCK_LABEL {
+                            config::save_dock_anchor(&handle, x, y);
+                        } else if let Some(service) = service_from_widget_label(&label) {
+                            config::save_widget_pos(&handle, &service, x, y);
+                        }
+                    }
+                }
+            });
+        }
+    });
 }
 
 /// A window's current on-screen position, if it is really on screen. Windows parks a
