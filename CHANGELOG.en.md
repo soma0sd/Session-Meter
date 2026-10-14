@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.4.2] - 2026-10-14
+
+### Fixed
+
+- **Widget movement across monitors**: individual and docked widgets no longer snap back at
+  monitor boundaries during dragging. Placement uses the union of all monitor work areas,
+  including fully visible positions spanning adjacent monitors.
+- **Off-screen recovery**: invalid positions move to the nearest fully visible position,
+  excluding monitor gaps and taskbar areas. Periodic checks also recover widgets after monitor
+  disconnection or work-area changes. Windows too large to fit maximize their visible area.
+
 ## [1.4.1] - 2026-10-13
 
 ### Fixed
