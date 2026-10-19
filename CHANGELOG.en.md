@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.4.3] - 2026-10-19
+
+### Changed
+
+- **Shorter Antigravity not-running message**: the widget and stats window message is now "Launch needed" (Korean: "실행 필요").
+
 ## [1.4.2] - 2026-10-14
 
 ### Fixed

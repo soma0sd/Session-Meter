@@ -22,7 +22,7 @@ const en: Dict = {
   "common.notLoggedIn": "Not signed in",
   "common.sessionExpired": "Session expired - please sign in again",
   "common.usageUnavailable": "Usage temporarily unavailable",
-  "common.antigravityNotRunning": "Antigravity is not running",
+  "common.antigravityNotRunning": "Launch needed",
 
   "bucket.five_hour": "Current session",
   "bucket.seven_day": "Weekly session",
@@ -163,7 +163,7 @@ const ko: Dict = {
   "common.notLoggedIn": "로그인 필요",
   "common.sessionExpired": "세션 만료 - 다시 로그인하세요",
   "common.usageUnavailable": "사용량을 일시적으로 가져올 수 없음",
-  "common.antigravityNotRunning": "Antigravity가 실행 중이 아님",
+  "common.antigravityNotRunning": "실행 필요",
 
   "bucket.five_hour": "이번 세션",
   "bucket.seven_day": "주간 세션",
