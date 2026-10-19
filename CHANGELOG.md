@@ -3,6 +3,12 @@
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르며, 버전은 [SemVer](https://semver.org/lang/ko/)를 따릅니다. 항목은 마이너 버전 단위로 묶습니다.
 
+## [1.4.3] - 2026-10-19
+
+### Changed
+
+- **Antigravity 미실행 문구 축약**: 위젯과 통계 창의 "Antigravity가 실행 중이 아님" 문구를 "실행 필요"로 줄였습니다. 영문 문구도 "Launch needed"로 줄였습니다.
+
 ## [1.4.2] - 2026-10-14
 
 ### Fixed
