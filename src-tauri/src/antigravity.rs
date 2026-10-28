@@ -15,6 +15,13 @@
 //! self-signed, one plain HTTP); which port is which is discovered by probing, not assumed.
 //! Both the CSRF token and the ports are re-discovered on every call and never cached: the
 //! IDE reassigns both whenever it restarts.
+//!
+//! Secondary source: when no language server answers, `fetch` falls back to the Antigravity
+//! CLI - `agy -p "/usage" --output-format json` is answered by the CLI itself (0 turns, 0
+//! tokens, no model call) and carries the same quota buckets under `command.data.groups`,
+//! using snake_case field names (`id`, `remaining_fraction`, `reset_time`). The CLI reports no
+//! account identity, so the email/plan stay empty on this path. Any CLI failure (not
+//! installed, signed out, timeout, unexpected output) degrades to `AppError::NotRunning`.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -230,6 +237,7 @@ fn groups_of(raw: &Value) -> Vec<&Value> {
 fn remaining_fraction(bucket: &Value) -> Option<f64> {
     bucket
         .get("remainingFraction")
+        .or_else(|| bucket.get("remaining_fraction"))
         .and_then(Value::as_f64)
         .or_else(|| {
             bucket
@@ -239,7 +247,7 @@ fn remaining_fraction(bucket: &Value) -> Option<f64> {
 }
 
 fn parse_reset_time(bucket: &Value) -> String {
-    match bucket.get("resetTime") {
+    match bucket.get("resetTime").or_else(|| bucket.get("reset_time")) {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Number(n)) => n
             .as_i64()
@@ -259,6 +267,7 @@ fn bucket_sort_key(key: &str) -> u8 {
         "gemini-weekly" => 1,
         "3p-5h" => 2,
         "3p-weekly" => 3,
+        "gemini-argon-wtu-weekly" => 4,
         _ => 99,
     }
 }
@@ -269,6 +278,7 @@ fn humanize(key: &str) -> String {
         "gemini-weekly" => "Gemini weekly".to_string(),
         "3p-5h" => "Claude/GPT 5-hour".to_string(),
         "3p-weekly" => "Claude/GPT weekly".to_string(),
+        "gemini-argon-wtu-weekly" => "Gemini 4 Argon weekly".to_string(),
         other => other.replace('-', " "),
     }
 }
@@ -295,7 +305,11 @@ fn parse_snapshot(raw: &Value) -> Result<UsageSnapshot, AppError> {
             continue;
         };
         for b in items {
-            let Some(key) = b.get("bucketId").and_then(Value::as_str) else {
+            let Some(key) = b
+                .get("bucketId")
+                .or_else(|| b.get("id"))
+                .and_then(Value::as_str)
+            else {
                 continue;
             };
             let Some(frac) = remaining_fraction(b) else {
@@ -360,9 +374,92 @@ fn parse_user_status(raw: &Value) -> (String, String) {
     (email, plan)
 }
 
+// --- agy CLI fallback ---
+
+/// Upper bound for one `agy -p "/usage"` run. Measured at roughly 2-7s; a signed-out CLI with an
+/// open stdin would otherwise wait for a login code, so stdin is closed and this caps the rest.
+const AGY_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[cfg(windows)]
+fn agy_executable() -> Option<std::path::PathBuf> {
+    let on_path = std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join("agy.exe"))
+            .find(|p| p.is_file())
+    });
+    on_path.or_else(|| {
+        let default = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+            .join("agy")
+            .join("bin")
+            .join("agy.exe");
+        default.is_file().then_some(default)
+    })
+}
+
+/// Run `agy -p "/usage" --output-format json` and return the `command.data` payload. Every
+/// failure (CLI missing, signed out, timeout, non-JSON, no `command.data`) is `NotRunning`: the
+/// fallback is best-effort and must never turn an unreachable IDE into a hard error.
+#[cfg(windows)]
+fn run_agy_usage() -> Result<Value, AppError> {
+    use std::io::Read;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let exe = agy_executable().ok_or(AppError::NotRunning)?;
+    let mut child = Command::new(exe)
+        .args(["-p", "/usage", "--output-format", "json"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| AppError::NotRunning)?;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Some(mut out) = child.stdout.take() {
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = out.read_to_string(&mut buf);
+            let _ = tx.send(buf);
+        });
+    }
+    let output = rx.recv_timeout(AGY_TIMEOUT).ok();
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let raw = output.ok_or(AppError::NotRunning)?;
+    let parsed: Value = serde_json::from_str(raw.trim()).map_err(|_| AppError::NotRunning)?;
+    parsed
+        .pointer("/command/data")
+        .cloned()
+        .ok_or(AppError::NotRunning)
+}
+
+#[cfg(not(windows))]
+fn run_agy_usage() -> Result<Value, AppError> {
+    Err(AppError::NotRunning)
+}
+
+async fn fetch_from_agy() -> Result<UsageSnapshot, AppError> {
+    let data = tauri::async_runtime::spawn_blocking(run_agy_usage)
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))??;
+    parse_snapshot(&data).map_err(|_| AppError::NotRunning)
+}
+
 // --- entry points ---
 
+/// IDE first (richer: carries account identity), agy CLI only when the IDE is unreachable.
 async fn discover_and_fetch() -> Result<UsageSnapshot, AppError> {
+    match fetch_from_ide().await {
+        Err(AppError::NotRunning) => fetch_from_agy().await,
+        other => other,
+    }
+}
+
+async fn fetch_from_ide() -> Result<UsageSnapshot, AppError> {
     let candidates = tauri::async_runtime::spawn_blocking(discover_candidates)
         .await
         .map_err(|e| AppError::Other(e.to_string()))??;
@@ -387,4 +484,66 @@ async fn discover_and_fetch() -> Result<UsageSnapshot, AppError> {
 /// state that needs a stored credential to distinguish from "never signed in".
 pub async fn fetch(_app: &AppHandle, _client: &reqwest::Client) -> Result<UsageSnapshot, AppError> {
     discover_and_fetch().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Trimmed from a real `agy -p "/usage" --output-format json` reply (agy 1.4.7): snake_case
+    // fields, `id` instead of `bucketId`, no `displayName`.
+    const AGY_USAGE: &str = r#"{"command":{"name":"usage","data":{"groups":[
+      {"name":"Gemini 4 Argon","buckets":[{"id":"gemini-argon-wtu-weekly","name":"Gemini 4 Argon Weekly Limit","window":"weekly","remaining_fraction":0.9927,"reset_time":"2026-11-02T02:55:24Z"}]},
+      {"name":"Claude and GPT models","buckets":[
+        {"id":"3p-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":1,"reset_time":"2026-10-28T07:24:17Z"},
+        {"id":"3p-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":1,"reset_time":"2026-11-04T02:24:17Z"}]},
+      {"name":"Gemini Models","buckets":[
+        {"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.9872,"reset_time":"2026-11-02T01:56:50Z"},
+        {"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.9744,"reset_time":"2026-10-28T06:48:19Z"}]}
+    ]}}}"#;
+
+    #[test]
+    fn parses_agy_usage_payload() {
+        let v: Value = serde_json::from_str(AGY_USAGE).unwrap();
+        let snap = parse_snapshot(v.pointer("/command/data").unwrap()).unwrap();
+        let keys: Vec<&str> = snap.buckets.iter().map(|b| b.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            ["gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly", "gemini-argon-wtu-weekly"]
+        );
+        let five = snap.five_hour.expect("gemini 5h headline");
+        assert_eq!(five.remaining, 97);
+        assert_eq!(five.resets_at, "2026-10-28T06:48:19Z");
+        assert_eq!(snap.primary_key.as_deref(), Some("gemini-5h"));
+        // agy's own `name` ("Five Hour Limit Remaining") is not a label; humanize() supplies one.
+        assert_eq!(snap.buckets[4].label, "Gemini 4 Argon weekly");
+        assert_eq!(snap.buckets[0].label, "Gemini 5-hour");
+    }
+
+    #[test]
+    fn rejects_payload_without_buckets() {
+        let v: Value = serde_json::from_str(r#"{"groups":[]}"#).unwrap();
+        assert!(parse_snapshot(&v).is_err());
+    }
+
+    #[test]
+    fn ide_payload_shape_still_parses() {
+        let v: Value = serde_json::from_str(
+            r#"{"response":{"groups":[{"buckets":[{"bucketId":"gemini-5h","remainingFraction":0.5,"resetTime":"2026-10-28T06:48:19Z","displayName":"X"}]}]}}"#,
+        )
+        .unwrap();
+        let snap = parse_snapshot(&v).unwrap();
+        assert_eq!(snap.buckets[0].remaining, 50);
+        assert_eq!(snap.buckets[0].label, "X");
+    }
+
+    // Manual check against a real, signed-in `agy` install: `cargo test live_agy -- --ignored`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn live_agy_usage_parses() {
+        let data = run_agy_usage().expect("agy -p /usage reachable");
+        let snap = parse_snapshot(&data).expect("buckets parse");
+        assert!(snap.five_hour.is_some());
+    }
 }
