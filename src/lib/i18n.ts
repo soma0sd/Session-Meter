@@ -33,6 +33,7 @@ const en: Dict = {
   "bucket.gemini-weekly": "Gemini weekly",
   "bucket.3p-5h": "Claude/GPT 5-hour",
   "bucket.3p-weekly": "Claude/GPT weekly",
+  "bucket.gemini-argon-wtu-weekly": "Gemini 4 Argon weekly",
   // Group-less forms, used by the Antigravity widget only: its own switch already says
   // which model group is on screen, so the readout names just the window. The full
   // labels above are still what the stats window and notifications use, where several
@@ -174,6 +175,7 @@ const ko: Dict = {
   "bucket.gemini-weekly": "Gemini 주간",
   "bucket.3p-5h": "Claude/GPT 5시간",
   "bucket.3p-weekly": "Claude/GPT 주간",
+  "bucket.gemini-argon-wtu-weekly": "Gemini 4 Argon 주간",
   "bucket.window.5h": "5시간",
   "bucket.window.weekly": "주간",
   "bucket.codex-5h": "Codex 5시간",

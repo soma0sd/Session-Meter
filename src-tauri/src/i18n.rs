@@ -32,6 +32,7 @@ pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
         ("ko", "gemini-weekly") => "Gemini 주간".to_string(),
         ("ko", "3p-5h") => "Claude/GPT 5시간".to_string(),
         ("ko", "3p-weekly") => "Claude/GPT 주간".to_string(),
+        ("ko", "gemini-argon-wtu-weekly") => "Gemini 4 Argon 주간".to_string(),
         ("en", "five_hour") => "Current session".to_string(),
         ("en", "seven_day") => "Weekly session".to_string(),
         ("en", "codex-5h") => "Codex 5-hour".to_string(),
@@ -40,6 +41,7 @@ pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
         ("en", "gemini-weekly") => "Gemini weekly".to_string(),
         ("en", "3p-5h") => "Claude/GPT 5-hour".to_string(),
         ("en", "3p-weekly") => "Claude/GPT weekly".to_string(),
+        ("en", "gemini-argon-wtu-weekly") => "Gemini 4 Argon weekly".to_string(),
         _ => fallback.to_string(),
     }
 }

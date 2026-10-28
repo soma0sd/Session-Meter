@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.5.0] - 2026-10-28
+
+### Added
+
+- **Antigravity CLI secondary source**: when the Antigravity app is not running, the installed `agy`
+  CLI is queried with `agy -p "/usage"`. The app is still tried first; the CLI is used only when the app
+  is unreachable. The CLI query makes no model call and consumes no quota; if it fails (not installed,
+  signed out, timeout) the widget shows "Launch needed" as before. The CLI reports no account details,
+  so email and plan are empty on this path.
+- **Gemini 4 Argon weekly limit**: the Argon weekly limit reported by the CLI is now shown in the stats
+  window and notifications.
+
 ## [1.4.3] - 2026-10-19
 
 ### Changed

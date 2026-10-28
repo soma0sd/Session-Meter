@@ -9,7 +9,7 @@ SessionMeter가 서비스별 사용량에 대해 얻을 수 있는 정보, 범�
 | Claude | `claude.ai` 비공개 웹 API와 앱 내 로그인 창에서 확보한 브라우저 세션 쿠키 | 5시간·주간 및 응답에서 발견되는 사용량 버킷 |
 | Codex | `chatgpt.com` 비공개 사용량 엔드포인트와 전용 격리 프로세스의 ChatGPT 로그인 세션 쿠키 | 요금제가 제공하는 `limit_window_seconds` `18000`(5시간 세션)·`604800`(주간) 한도 |
 | Gemini | `gemini.google.com/usage` 화면 스크래핑과 별도 프로세스 로그인 창 | 화면에 표시되는 구독 사용량, 실험적 기능 |
-| Antigravity IDE | 실행 중인 IDE의 비공개 로컬 loopback API | Gemini 및 Claude/GPT 모델군의 코딩 쿼터, Windows 전용 |
+| Antigravity IDE | 실행 중인 IDE의 비공개 로컬 loopback API | Gemini 및 Claude/GPT 모델군의 코딩 쿼터, Windows 전용. IDE 미실행 시 `agy -p "/usage"`(CLI)로 대체 조회 |
 
 Claude·Codex·Gemini의 연동은 공식 또는 공개 API가 아닙니다. Antigravity IDE 연동도 문서화되지 않은
 로컬 인터페이스입니다. 서비스 정책이나 응답 구조가 바뀌면 로그인 또는 조회가 실패할 수 있습니다.
