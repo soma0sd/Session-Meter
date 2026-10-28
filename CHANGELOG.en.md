@@ -13,8 +13,9 @@ All notable changes to this project are documented here. The format is based on
   is unreachable. The CLI query makes no model call and consumes no quota; if it fails (not installed,
   signed out, timeout) the widget shows "Launch needed" as before. The CLI reports no account details,
   so email and plan are empty on this path.
-- **Gemini 4 Argon weekly limit**: the Argon weekly limit reported by the CLI is now shown in the stats
-  window and notifications.
+- **Gemini 4 Argon weekly limit**: when the source reports an Argon weekly limit, it is shown in the stats
+  window and judged by the weekly alert threshold, with Korean and English labels. The widget and tray
+  headline stays on the Gemini group as before.
 
 ## [1.4.3] - 2026-10-19
 
