@@ -50,7 +50,7 @@ pub struct UsageSnapshot {
     pub buckets: Vec<Bucket>,
     pub organization_name: String,
     pub account_email: String,
-    /// Friendly subscription/plan label (e.g. "Claude Max 20x"), derived from the org's
+    /// Friendly subscription/plan label (e.g. "Claude Ultra"), derived from the org's
     /// rate-limit tier. Empty when unknown.
     pub subscription: String,
     pub fetched_at: String,
@@ -159,16 +159,30 @@ pub fn parse_usage(raw: &Value, org_fallback: &str) -> UsageSnapshot {
     }
     buckets.sort_by_key(|b| bucket_order(&b.key));
 
-    let five_hour = buckets.iter().find(|b| b.key == "five_hour").map(to_window);
-    let weekly_primary = buckets
-        .iter()
-        .find(|b| b.key == "seven_day")
-        .or_else(|| {
-            buckets
-                .iter()
-                .find(|b| b.key.contains("seven") || b.key.contains("week"))
-        })
-        .map(to_window);
+    let session = buckets.iter().find(|b| b.key == "five_hour");
+    let weekly = buckets.iter().find(|b| b.key == "seven_day").or_else(|| {
+        buckets
+            .iter()
+            .find(|b| b.key.contains("seven") || b.key.contains("week"))
+    });
+
+    // Ultra accounts no longer have a 5-hour limit, so the usage response can omit `five_hour`.
+    // The weekly quota is then the only headline window, carried in the first-headline slot
+    // like Codex's weekly-only plans.
+    let (five_hour, weekly_primary, primary_key, secondary_key) = match (session, weekly) {
+        (None, Some(weekly)) => (
+            Some(to_window(weekly)),
+            None,
+            weekly.key.clone(),
+            None,
+        ),
+        _ => (
+            session.map(to_window),
+            weekly.map(to_window),
+            "five_hour".to_string(),
+            Some("seven_day".to_string()),
+        ),
+    };
 
     let organization_name = raw
         .get("organization_name")
@@ -181,8 +195,8 @@ pub fn parse_usage(raw: &Value, org_fallback: &str) -> UsageSnapshot {
         service_id: crate::service::CLAUDE.to_string(),
         five_hour,
         weekly_primary,
-        primary_key: Some("five_hour".to_string()),
-        secondary_key: Some("seven_day".to_string()),
+        primary_key: Some(primary_key),
+        secondary_key,
         buckets,
         organization_name,
         account_email: String::new(),
@@ -201,6 +215,13 @@ fn subscription_label(org: &Value) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let t = tier.strip_prefix("default_").unwrap_or(tier);
+    // Anthropic renamed Max 5x to Max and Max 20x to Ultra (announced 2026-10-30) at the same
+    // prices. The tier ids can keep the old multiplier suffix, so map them to the new names.
+    let t = match t.to_ascii_lowercase().as_str() {
+        "claude_max_5x" => "claude_max",
+        "claude_max_20x" => "claude_ultra",
+        _ => t,
+    };
     // A bare "default" (or empty) tier carries no plan info -> fall through to capabilities.
     if !t.is_empty() && !t.eq_ignore_ascii_case("default") {
         let mut out = String::new();
@@ -329,4 +350,76 @@ pub async fn fetch_usage(
         Err(_) => snapshot.organization_name = strip_org_suffix(&snapshot.organization_name),
     }
     Ok(snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn window(utilization: f64) -> Value {
+        json!({ "utilization": utilization, "resets_at": "2026-11-02T00:00:00Z" })
+    }
+
+    #[test]
+    fn session_and_weekly_windows_keep_the_two_window_headline() {
+        let snap = parse_usage(
+            &json!({ "five_hour": window(40.0), "seven_day": window(10.0) }),
+            "org",
+        );
+        assert_eq!(snap.five_hour.as_ref().map(|w| w.remaining), Some(60));
+        assert_eq!(snap.weekly_primary.as_ref().map(|w| w.remaining), Some(90));
+        assert_eq!(snap.primary_key.as_deref(), Some("five_hour"));
+        assert_eq!(snap.secondary_key.as_deref(), Some("seven_day"));
+    }
+
+    #[test]
+    fn missing_session_window_promotes_the_weekly_quota_to_the_headline() {
+        let snap = parse_usage(&json!({ "seven_day": window(25.0) }), "org");
+        assert_eq!(snap.five_hour.as_ref().map(|w| w.remaining), Some(75));
+        assert!(snap.weekly_primary.is_none());
+        assert_eq!(snap.primary_key.as_deref(), Some("seven_day"));
+        assert!(snap.secondary_key.is_none());
+    }
+
+    #[test]
+    fn null_session_window_is_treated_as_missing() {
+        let snap = parse_usage(
+            &json!({ "five_hour": null, "seven_day": window(25.0), "seven_day_opus": window(5.0) }),
+            "org",
+        );
+        assert_eq!(snap.primary_key.as_deref(), Some("seven_day"));
+        assert!(snap.secondary_key.is_none());
+        assert_eq!(snap.buckets.len(), 2);
+    }
+
+    #[test]
+    fn empty_usage_keeps_the_default_headline_keys() {
+        let snap = parse_usage(&json!({}), "org");
+        assert!(snap.five_hour.is_none());
+        assert_eq!(snap.primary_key.as_deref(), Some("five_hour"));
+        assert_eq!(snap.secondary_key.as_deref(), Some("seven_day"));
+    }
+
+    fn label(tier: &str) -> String {
+        subscription_label(&json!({ "rate_limit_tier": tier }))
+    }
+
+    #[test]
+    fn renamed_max_tiers_map_to_the_new_plan_names() {
+        assert_eq!(label("default_claude_max_20x"), "Claude Ultra");
+        assert_eq!(label("default_claude_max_5x"), "Claude Max");
+        assert_eq!(label("default_claude_ultra"), "Claude Ultra");
+        assert_eq!(label("default_claude_max"), "Claude Max");
+    }
+
+    #[test]
+    fn other_tiers_and_capability_fallbacks_are_unchanged() {
+        assert_eq!(label("default_claude_pro"), "Claude Pro");
+        assert_eq!(
+            subscription_label(&json!({ "rate_limit_tier": "default", "capabilities": ["claude_max"] })),
+            "Claude Max"
+        );
+        assert_eq!(subscription_label(&json!({})), "");
+    }
 }
