@@ -27,7 +27,7 @@ pub struct ServiceStatus {
     pub logged_in: bool,
     pub org_name: String,
     pub email: String,
-    /// Plan / subscription (e.g. "Claude Max 20x", "Gemini Pro"), from the last usage snapshot.
+    /// Plan / subscription (e.g. "Claude Ultra", "Gemini Pro"), from the last usage snapshot.
     pub subscription: String,
     /// The last snapshot's status ("ok" | "not_running" | "unauthorized" | ... ), or empty
     /// before the first poll completes. `logged_in` is meaningless for a login-less service

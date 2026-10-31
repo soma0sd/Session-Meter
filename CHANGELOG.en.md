@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.6.0] - 2026-10-31
+
+### Changed
+
+- **Claude plan rename**: Anthropic renamed Max 5x to Max and Max 20x to Ultra on 2026-10-30. The plan
+  shown in the accounts panel and the stats window now uses the new names, even when the plan id still
+  carries the old multiplier (`claude_max_5x`, `claude_max_20x`).
+- **Claude plans without a 5-hour limit**: Ultra no longer has a 5-hour limit, so the usage response may
+  omit the 5-hour session window. In that case the weekly limit becomes the headline metric and the
+  widget, tray, stats window and alerts show the weekly usage only. Plans that still have a 5-hour limit
+  look the same as before.
+
 ## [1.5.0] - 2026-10-28
 
 ### Added

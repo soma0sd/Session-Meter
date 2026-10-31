@@ -6,7 +6,7 @@ SessionMeter가 서비스별 사용량에 대해 얻을 수 있는 정보, 범�
 
 | 서비스 | 출처와 인증 | 지원 범위 |
 | --- | --- | --- |
-| Claude | `claude.ai` 비공개 웹 API와 앱 내 로그인 창에서 확보한 브라우저 세션 쿠키 | 5시간·주간 및 응답에서 발견되는 사용량 버킷 |
+| Claude | `claude.ai` 비공개 웹 API와 앱 내 로그인 창에서 확보한 브라우저 세션 쿠키 | 요금제가 제공하는 5시간·주간 및 응답에서 발견되는 사용량 버킷 |
 | Codex | `chatgpt.com` 비공개 사용량 엔드포인트와 전용 격리 프로세스의 ChatGPT 로그인 세션 쿠키 | 요금제가 제공하는 `limit_window_seconds` `18000`(5시간 세션)·`604800`(주간) 한도 |
 | Gemini | `gemini.google.com/usage` 화면 스크래핑과 별도 프로세스 로그인 창 | 화면에 표시되는 구독 사용량, 실험적 기능 |
 | Antigravity IDE | 실행 중인 IDE의 비공개 로컬 loopback API | Gemini 및 Claude/GPT 모델군의 코딩 쿼터, Windows 전용. IDE 미실행 시 `agy -p "/usage"`(CLI)로 대체 조회 |
@@ -31,6 +31,10 @@ Claude 요청 흐름:
 | `seven_day.utilization` / `resets_at` | 주간 사용률 %와 초기화 시각 | 위젯·통계 |
 | 기타 `{utilization, resets_at}` | 예: 모델군별 주간 한도 | 추가 버킷 표시 |
 | `organization_name`, 계정 표시명·이메일 | 계정 라벨 | 설정 계정 패널 |
+| 조직의 `rate_limit_tier` | 요금제 이름(예: `claude_max_20x`는 Ultra, `claude_max_5x`는 Max로 표시) | 설정 계정 패널·통계 |
+
+`five_hour`가 응답에 없는 요금제(5시간 한도가 없는 Ultra 등)에서는 `seven_day`가 기본 창이 되어 주간 사용률
+하나만 트레이·위젯·통계에 표시합니다. 응답 구조는 공개 계약이 아니므로 요금제별 필드 구성은 바뀔 수 있습니다.
 
 ## Codex 구독 사용량
 

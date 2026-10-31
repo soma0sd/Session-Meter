@@ -129,7 +129,7 @@ export interface ServiceStatus {
   logged_in: boolean;
   org_name: string;
   email: string;
-  /** Plan / subscription (e.g. "Claude Max 20x", "Gemini Pro"). */
+  /** Plan / subscription (e.g. "Claude Ultra", "Gemini Pro"). */
   subscription: string;
   /** Last snapshot's status ("ok" | "not_running" | "unauthorized" | ""), for services (like
    *  Antigravity) where `logged_in` alone doesn't say whether it's currently reachable. */
@@ -235,7 +235,7 @@ function mockUsage(service?: string): UsageSnapshot {
     buckets,
     organization_name: "Preview Org",
     account_email: "you@example.com",
-    subscription: "Claude Max 20x",
+    subscription: "Claude Ultra",
     fetched_at: iso(0),
     status: "ok",
   };
@@ -308,7 +308,7 @@ export const getSessionStatus = (service?: string) =>
   }));
 export const getServicesStatus = () =>
   call<ServiceStatus[]>("get_services_status", undefined, () => [
-    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Max 20x", live_status: "ok" },
+    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Ultra", live_status: "ok" },
     { id: "codex", name: "Codex", logged_in: true, org_name: "Codex", email: "", subscription: "ChatGPT Plus", live_status: "ok" },
     { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@gmail.com", subscription: "Gemini Pro", live_status: "ok" },
     { id: "antigravity_ide", name: "Antigravity", logged_in: true, org_name: "", email: "", subscription: "", live_status: "ok" },
