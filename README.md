@@ -111,6 +111,11 @@ npm run tauri build    # 릴리스 빌드 + 설치 프로그램(NSIS) 생성
 소스는 [`docs/`](docs/)에 있습니다. 가져올 수 있는 데이터의 범위와 한계는
 [`docs/DATA_CAPABILITIES.md`](docs/DATA_CAPABILITIES.md)를 참고하십시오.
 
+### 관련 글
+
+- [Rust·C++·Python CLI 구현 비교와 Rust 선택 이유](https://soma0sd.dev/blog/rust-vs-cpp-python-session-meter/): 계산부를 세 언어로 같은 사양으로 구현해 코드 길이·빌드·처리 속도를 비교한 기록
+- [AI 코딩 도구 3종의 토큰 사용량 자동 집계](https://soma0sd.dev/blog/coding-agent-token-metering/): Claude Code·Codex·Antigravity 로컬 기록으로 사용량을 집계하는 방식
+
 ## 보안·프라이버시
 
 - **서비스별 세션 분리 저장.** 로그인 창에서 얻은 Claude·Codex·Gemini 세션 쿠키는 OS 애플리케이션
