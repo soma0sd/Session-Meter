@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use tauri_plugin_positioner::{Position, WindowExt};
 
 use crate::config;
+use crate::placement::{self, Rect};
 use crate::state::AppState;
 
 /// The one frameless window that hosts every docked service as a grid cell (see `dock.rs`).
@@ -17,6 +18,21 @@ pub const DOCK_LABEL: &str = "widget-dock";
 
 /// Used when a widget window's `outer_size()` cannot be read yet (e.g. just created).
 const FALLBACK_SIZE: (i32, i32) = (252, 150);
+const TRAY_MENU_WIDTH: f64 = 196.0;
+
+pub struct TrayMenu {
+    anchor: Option<PhysicalPosition<i32>>,
+    height: u32,
+}
+
+impl Default for TrayMenu {
+    fn default() -> Self {
+        Self {
+            anchor: None,
+            height: 164,
+        }
+    }
+}
 
 /// Safety net: if the login page has not left `about:blank` within 2s (webview stuck /
 /// blank / unresponsive), cancel the capture watcher and close the window so the user is
@@ -45,8 +61,21 @@ fn spawn_login_blank_guard(app: &AppHandle, generation: u64) {
 
 pub fn show_and_focus(app: &AppHandle, label: &str) {
     if let Some(win) = app.get_webview_window(label) {
-        let _ = win.show();
         let _ = win.unminimize();
+        // A previously opened window can be stranded when a display is disconnected.
+        if let (Ok(position), Ok(size)) = (win.outer_position(), win.outer_size()) {
+            let (x, y, moved) = clamp_rect_to_screen(
+                &win,
+                position.x,
+                position.y,
+                size.width as i32,
+                size.height as i32,
+            );
+            if moved {
+                let _ = win.set_position(PhysicalPosition::new(x, y));
+            }
+        }
+        let _ = win.show();
         let _ = win.set_focus();
     }
 }
@@ -588,34 +617,74 @@ pub fn reconcile_widget_visibility(app: &AppHandle) {
     }
 }
 
-/// Position and show the custom context menu near the tray click point.
-/// The tray usually sits bottom-right, so the menu is placed above-left of the click,
-/// then clamped to the primary monitor.
+fn place_tray_menu(win: &tauri::WebviewWindow, anchor: PhysicalPosition<i32>, height: u32) {
+    let Some(monitor) = win
+        .monitor_from_point(f64::from(anchor.x), f64::from(anchor.y))
+        .ok()
+        .flatten()
+        .or_else(|| win.primary_monitor().ok().flatten())
+    else {
+        return;
+    };
+    let (x, y, w, h) = work_rect(&monitor);
+    let area = Rect::new(x, y, w, h);
+    if area.w <= 0 || area.h <= 0 {
+        return;
+    }
+    let scale = monitor.scale_factor();
+    let bounds = placement::tray_menu_bounds(
+        area,
+        anchor.x,
+        anchor.y,
+        (TRAY_MENU_WIDTH * scale).ceil() as u32,
+        (f64::from(height) * scale).ceil() as u32,
+    );
+    let position = PhysicalPosition::new(bounds.x as i32, bounds.y as i32);
+    let size = PhysicalSize::new(bounds.w as u32, bounds.h as u32);
+    // Move first so Windows applies the destination monitor's DPI before sizing.
+    if win.outer_position().ok() != Some(position) {
+        let _ = win.set_position(position);
+    }
+    if win.inner_size().ok() != Some(size) {
+        let _ = win.set_size(size);
+    }
+}
+
+/// Position and show the custom menu next to the tray click on the same monitor.
 pub fn show_menu_at(app: &AppHandle, x: f64, y: f64) {
-    if let Some(win) = app.get_webview_window("menu") {
-        let size = win
-            .outer_size()
-            .unwrap_or(PhysicalSize::new(196, 300));
-        let w = size.width as i32;
-        let h = size.height as i32;
-        let mut tx = x as i32 - w;
-        let mut ty = y as i32 - h;
-        if let Ok(Some(mon)) = win.primary_monitor() {
-            let mp = mon.position();
-            let ms = mon.size();
-            let min_x = mp.x;
-            let min_y = mp.y;
-            let max_x = (mp.x + ms.width as i32 - w).max(min_x);
-            let max_y = (mp.y + ms.height as i32 - h).max(min_y);
-            tx = tx.clamp(min_x, max_x);
-            ty = ty.clamp(min_y, max_y);
-        }
-        let _ = win.set_position(PhysicalPosition::new(tx, ty));
+    if let (Some(win), Some(state)) = (app.get_webview_window("menu"), app.try_state::<AppState>()) {
+        let anchor = PhysicalPosition::new(x.round() as i32, y.round() as i32);
+        let height = {
+            let mut menu = state.tray_menu.lock().unwrap();
+            menu.anchor = Some(anchor);
+            menu.height
+        };
+        place_tray_menu(&win, anchor, height);
         let _ = win.show();
         let _ = win.set_focus();
         // A tray right-click leaves the shell as the foreground process, so Windows
         // blocks the menu from taking focus; without this it shows but ignores clicks.
         force_foreground(&win);
+    }
+}
+
+/// Store the measured content height in logical pixels, and re-anchor an open menu after a resize.
+#[tauri::command]
+pub fn fit_tray_menu(win: tauri::WebviewWindow, state: tauri::State<'_, AppState>, height: u32) {
+    if win.label() != "menu" {
+        return;
+    }
+    let height = height.clamp(30, 1000);
+    let anchor = {
+        let mut menu = state.tray_menu.lock().unwrap();
+        if menu.height == height {
+            return;
+        }
+        menu.height = height;
+        menu.anchor
+    };
+    if let Some(anchor) = anchor.filter(|_| win.is_visible().unwrap_or(false)) {
+        place_tray_menu(&win, anchor, height);
     }
 }
 

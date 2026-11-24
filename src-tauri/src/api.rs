@@ -55,6 +55,15 @@ pub struct UsageSnapshot {
     pub subscription: String,
     pub fetched_at: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub antigravity_source: Option<AntigravitySource>,
+}
+
+#[derive(Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum AntigravitySource {
+    Ide,
+    Cli,
 }
 
 pub fn now_iso() -> String {
@@ -203,6 +212,7 @@ pub fn parse_usage(raw: &Value, org_fallback: &str) -> UsageSnapshot {
         subscription: String::new(),
         fetched_at: now_iso(),
         status: "ok".to_string(),
+        antigravity_source: None,
     }
 }
 

@@ -19,7 +19,10 @@ export interface Bucket {
 
 export type UsageStatus = "ok" | "unauthorized" | "not_running" | "error";
 
+type AntigravitySource = "ide" | "cli";
+
 export interface UsageSnapshot {
+  antigravity_source?: AntigravitySource;
   service_id: string;
   /** Legacy field name for the provider's primary headline window. Not always a 5-hour window. */
   five_hour: WindowUsage | null;
@@ -134,6 +137,7 @@ export interface ServiceStatus {
   /** Last snapshot's status ("ok" | "not_running" | "unauthorized" | ""), for services (like
    *  Antigravity) where `logged_in` alone doesn't say whether it's currently reachable. */
   live_status: string;
+  antigravity_source?: AntigravitySource;
 }
 
 export interface UpdateInfo {
@@ -311,7 +315,7 @@ export const getServicesStatus = () =>
     { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Ultra", live_status: "ok" },
     { id: "codex", name: "Codex", logged_in: true, org_name: "Codex", email: "", subscription: "ChatGPT Plus", live_status: "ok" },
     { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@gmail.com", subscription: "Gemini Pro", live_status: "ok" },
-    { id: "antigravity_ide", name: "Antigravity", logged_in: true, org_name: "", email: "", subscription: "", live_status: "ok" },
+    { id: "antigravity_ide", name: "Antigravity", logged_in: true, org_name: "", email: "", subscription: "", live_status: "ok", antigravity_source: "ide" },
   ]);
 export const openLoginWindow = (service?: string) =>
   call<void>("open_login_window", { service }, () => undefined);
@@ -329,6 +333,8 @@ export const openSettingsWindow = () =>
   call<void>("open_settings_window", undefined, () => undefined);
 export const openStatsWindow = () => call<void>("open_stats_window", undefined, () => undefined);
 export const openStyleWindow = () => call<void>("open_style_window", undefined, () => undefined);
+export const fitTrayMenu = (height: number) =>
+  call<void>("fit_tray_menu", { height }, () => undefined);
 export const toggleWidget = () => call<void>("toggle_widget", undefined, () => undefined);
 export const setAlwaysOnTop = (service: string, on: boolean) =>
   call<void>("set_always_on_top", { service, on }, () => undefined);
@@ -357,6 +363,8 @@ export const getDockMembers = () =>
 export const setAutostart = (enabled: boolean) =>
   call<void>("set_autostart", { enabled }, () => undefined);
 export const getAutostart = () => call<boolean>("get_autostart", undefined, () => false);
+export const isMicrosoftStoreBuild = () =>
+  call<boolean>("is_microsoft_store_build", undefined, () => false);
 export const setTheme = (theme: string) => call<void>("set_theme", { theme }, () => undefined);
 export const quitApp = () => call<void>("quit_app", undefined, () => undefined);
 

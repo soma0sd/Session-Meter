@@ -124,6 +124,7 @@ async fn poll_once(app: &AppHandle) {
                     subscription: String::new(),
                     fetched_at: api::now_iso(),
                     status: "not_running".to_string(),
+                    antigravity_source: None,
                 };
                 usage::apply_snapshot(app, placeholder);
             }

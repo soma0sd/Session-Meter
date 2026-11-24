@@ -8,18 +8,15 @@
     openStatsWindow,
     openSettingsWindow,
     openStyleWindow,
+    fitTrayMenu,
     getUpdateState,
     installUpdate,
     quitApp,
     type UpdateInfo,
   } from "../lib/ipc";
 
-  const MENU_W = 196;
-
   type Item = { key: string; label: string; action: () => Promise<unknown> };
 
-  // Usage refreshes automatically on the poll interval, so the menu has no manual refresh. The
-  // widget show/hide is a toggle switch (below), not a plain row.
   const items: Item[] = [
     { key: "style", label: "menu.style", action: openStyleWindow },
     { key: "stats", label: "menu.stats", action: openStatsWindow },
@@ -30,28 +27,28 @@
   let navEl: HTMLElement | undefined;
   let ro: ResizeObserver | undefined;
   let unlisteners: Array<() => void> = [];
+  let measuredHeight = 0;
 
   // Size the frameless window to the menu content so a conditional update row doesn't leave
   // empty space or clip.
   async function fitHeight() {
     if (!navEl) return;
     const h = Math.ceil(navEl.getBoundingClientRect().height) + 6;
-    if (h < 30) return;
+    if (h < 30 || h === measuredHeight) return;
+    measuredHeight = h;
     try {
-      const { LogicalSize } = await import("@tauri-apps/api/dpi");
-      await getCurrentWindow().setSize(new LogicalSize(MENU_W, h));
+      await fitTrayMenu(h);
     } catch {
-      /* not in Tauri */
+      if (measuredHeight === h) measuredHeight = 0;
     }
   }
 
   onMount(async () => {
-    await initWindow();
-    try {
-      updateInfo = await getUpdateState();
-    } catch {
-      /* preview */
+    if (navEl && "ResizeObserver" in window) {
+      ro = new ResizeObserver(() => void fitHeight());
+      ro.observe(navEl);
     }
+    void initWindow().then(fitHeight);
     try {
       unlisteners.push(
         await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
@@ -59,11 +56,7 @@
     } catch {
       /* preview */
     }
-    if (navEl && "ResizeObserver" in window) {
-      ro = new ResizeObserver(() => void fitHeight());
-      ro.observe(navEl);
-    }
-    void fitHeight();
+    void getUpdateState().then((info) => { if (!updateInfo) updateInfo = info; }).catch(() => {});
   });
 
   onDestroy(() => {
@@ -80,12 +73,12 @@
   }
 
   async function run(item: Item) {
+    await hide();
     try {
       await item.action();
     } catch (e) {
       console.error(e);
     }
-    await hide();
   }
 
   // Hide first, then install (download + install restarts the app).
@@ -107,6 +100,8 @@
   }
 </script>
 
+<svelte:window onkeydown={(event) => { if (event.key === "Escape") void hide(); }} />
+<div class="menu-scroll">
 <nav class="menu" bind:this={navEl}>
   {#if updateInfo?.available}
     <button class="item update" type="button" onclick={doUpdate}>
@@ -124,13 +119,18 @@
     {$t("menu.quit")}
   </button>
 </nav>
+</div>
 
 <style>
+  .menu-scroll {
+    height: 100%;
+    padding: 3px;
+    overflow: auto;
+  }
   .menu {
     display: flex;
     flex-direction: column;
     padding: 5px;
-    margin: 3px;
     background: rgb(var(--panel));
     color: rgb(var(--fg));
     border: 1px solid rgb(var(--border));
@@ -146,6 +146,7 @@
     color: inherit;
     font-size: 0.82rem;
     cursor: default;
+    overflow-wrap: anywhere;
     transition: background 0.08s ease;
   }
   .item:hover {

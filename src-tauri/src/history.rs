@@ -136,14 +136,16 @@ fn prune(app: &AppHandle, path: &PathBuf) {
 }
 
 /// Load a service's history within the retention window.
-pub fn load(app: &AppHandle, service: &str) -> Vec<HistoryPoint> {
+pub fn load(app: &AppHandle, service: &str, range_hours: Option<i64>) -> Vec<HistoryPoint> {
     let Some(path) = history_path(app, service) else {
         return Vec::new();
     };
     let Ok(content) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
-    let cutoff = OffsetDateTime::now_utc() - Duration::days(retention_days(app));
+    let retention_hours = retention_days(app) * 24;
+    let hours = range_hours.unwrap_or(retention_hours).min(retention_hours);
+    let cutoff = OffsetDateTime::now_utc() - Duration::hours(hours);
     content
         .lines()
         .filter_map(|l| serde_json::from_str::<HistoryPoint>(l).ok())

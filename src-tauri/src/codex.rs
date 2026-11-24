@@ -216,6 +216,7 @@ pub fn parse_usage(raw: &Value) -> Result<UsageSnapshot, AppError> {
             .to_string(),
         fetched_at: crate::api::now_iso(),
         status: "ok".to_string(),
+        antigravity_source: None,
     })
 }
 

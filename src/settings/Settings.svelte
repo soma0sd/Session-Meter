@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getVersion } from "@tauri-apps/api/app";
+  import { version as bundledVersion } from "../../package.json";
   import { t, setLocale, type Locale } from "../lib/i18n";
   import { initWindow } from "../lib/appinit";
   import { applyTheme, type Theme } from "../lib/theme";
@@ -16,12 +18,15 @@
     openStyleWindow,
     setAutostart,
     getAutostart,
+    isMicrosoftStoreBuild,
     checkForUpdate,
+    getUpdateState,
     installUpdate,
     openNewsWindow,
     type Settings,
     type ServiceStatus,
     type UpdateInfo,
+    type UsageSnapshot,
   } from "../lib/ipc";
 
   const DEFAULTS: Settings = {
@@ -48,33 +53,23 @@
   let s = $state<Settings>(structuredClone(DEFAULTS));
   let services = $state<ServiceStatus[]>([]);
   let autostart = $state(false);
+  let autostartSaving = $state(false);
   let signingIn = $state<string | null>(null);
-  let version = $state("0.0.1");
+  let version = $state(bundledVersion);
   let updateInfo = $state<UpdateInfo | null>(null);
   let updateChecking = $state(false);
+  let updateCheckFailed = $state(false);
   let updateInstalling = $state(false);
+  let microsoftStore = $state(false);
 
   let unlisteners: Array<() => void> = [];
 
   onMount(async () => {
-    await initWindow();
-    try {
-      s = await getSettings();
-    } catch {
-      /* preview */
-    }
-    await refreshServices();
-    try {
-      autostart = await getAutostart();
-    } catch {
-      /* preview */
-    }
-    try {
-      const mod = await import("@tauri-apps/api/app");
-      version = await mod.getVersion();
-    } catch {
-      /* preview */
-    }
+    void initWindow().then((initial) => { if (initial) s = initial; });
+    void refreshServices();
+    void getAutostart().then((value) => (autostart = value)).catch(() => {});
+    void isMicrosoftStoreBuild().then((value) => (microsoftStore = value)).catch(() => {});
+    void getVersion().then((value) => (version = value)).catch(() => {});
     try {
       unlisteners.push(
         await listen<Settings>("settings://changed", (e) => (s = e.payload)),
@@ -90,7 +85,19 @@
       );
       // Startup update check emits this when a newer signed release exists.
       unlisteners.push(
-        await listen<UpdateInfo>("update://available", (e) => (updateInfo = e.payload)),
+        await listen<UpdateInfo>("update://available", (e) => {
+          updateCheckFailed = false;
+          updateInfo = e.payload;
+        }),
+        await listen<UsageSnapshot>("usage://updated", ({ payload }) => {
+          if (payload.service_id !== "antigravity_ide") return;
+          const status = services.find((svc) => svc.id === payload.service_id);
+          if (!status) return;
+          status.email = payload.account_email;
+          status.subscription = payload.subscription;
+          status.live_status = payload.status;
+          status.antigravity_source = payload.antigravity_source;
+        }),
       );
       // Re-read settings + signed-in state whenever the window regains focus, so it starts from
       // the latest saved values and a change here can't clobber one made in another window (e.g.
@@ -106,6 +113,9 @@
     } catch {
       /* preview */
     }
+    void getUpdateState().then((info) => {
+      if (!updateInfo && !updateChecking && !updateCheckFailed) updateInfo = info;
+    }).catch(() => {});
   });
 
   onDestroy(() => unlisteners.forEach((u) => u()));
@@ -141,11 +151,15 @@
   }
 
   async function onAutostart(v: boolean) {
+    const previous = autostart;
+    autostartSaving = true;
     autostart = v;
     try {
       await setAutostart(v);
     } catch {
-      /* preview */
+      autostart = await getAutostart().catch(() => previous);
+    } finally {
+      autostartSaving = false;
     }
   }
 
@@ -192,10 +206,12 @@
 
   async function checkUpdate() {
     updateChecking = true;
+    updateCheckFailed = false;
     try {
       updateInfo = await checkForUpdate();
     } catch {
-      updateInfo = { available: false, version: "", notes: "" };
+      updateInfo = null;
+      updateCheckFailed = true;
     } finally {
       updateChecking = false;
     }
@@ -247,7 +263,15 @@
             {#if svc.subscription}<span class="acct-sub">{svc.subscription}</span>{/if}
           </div>
           <span class="status-pill" class:on={svc.live_status === "ok"}>
-            {svc.live_status === "ok" ? $t("settings.antigravityRunning") : $t("settings.antigravityWaiting")}
+            {#if svc.live_status === "ok" && svc.antigravity_source}
+              {$t(svc.antigravity_source === "ide" ? "settings.antigravityIde" : "settings.antigravityCli")}
+            {:else if svc.live_status === "not_running"}
+              {$t("settings.antigravityWaiting")}
+            {:else if svc.live_status}
+              {$t("common.usageUnavailable")}
+            {:else}
+              {$t("common.loading")}
+            {/if}
           </span>
         </div>
       {:else}
@@ -315,7 +339,8 @@
 
     <div class="row">
       <label for="autostart">{$t("settings.autostart")}</label>
-      <input id="autostart" type="checkbox" checked={autostart} onchange={(e) => onAutostart(e.currentTarget.checked)} />
+      <input id="autostart" type="checkbox" checked={autostart} disabled={autostartSaving}
+        onchange={(e) => onAutostart(e.currentTarget.checked)} />
     </div>
   </section>
 
@@ -387,8 +412,12 @@
   <section>
     <h2>{$t("settings.section.update")}</h2>
     <div class="row">
-      <span class="status">
-        {#if updateInfo?.available}
+      <span class="status" role="status">
+        {#if microsoftStore}
+          {$t("update.managedByStore")}
+        {:else if updateCheckFailed}
+          {$t("update.checkFailed")}
+        {:else if updateInfo?.available}
           {$t("update.available", { version: updateInfo.version })}
         {:else if updateInfo}
           {$t("update.upToDate")}
@@ -396,13 +425,13 @@
           {$t("update.current", { version })}
         {/if}
       </span>
-      {#if updateInfo?.available}
+      {#if !microsoftStore && updateInfo?.available}
         <button class="btn primary" onclick={installUpd} disabled={updateInstalling}>
           {updateInstalling ? $t("update.installing") : $t("update.install")}
         </button>
-      {:else}
+      {:else if !microsoftStore}
         <button class="btn" onclick={checkUpdate} disabled={updateChecking}>
-          {updateChecking ? $t("update.checking") : $t("update.check")}
+          {updateChecking ? $t("update.checking") : $t(updateCheckFailed ? "update.retry" : "update.check")}
         </button>
       {/if}
     </div>

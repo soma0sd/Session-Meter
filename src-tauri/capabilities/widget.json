@@ -3,5 +3,5 @@
   "identifier": "widget",
   "description": "Widget-only: allow each frameless service widget to be dragged from its own webview.",
   "windows": ["widget", "widget-*"],
-  "permissions": ["core:window:allow-start-dragging", "core:window:allow-set-size"]
+  "permissions": ["core:window:allow-start-dragging", "core:window:allow-set-size", "core:window:allow-set-position"]
 }
