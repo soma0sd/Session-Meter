@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { t } from "../lib/i18n";
@@ -81,14 +81,15 @@
     if (li.length && activeService !== LAYOUT_TAB && !li.some((x) => x.id === activeService)) {
       activeService = li[0].id;
     }
-    for (const svc of services.filter((x) => x.logged_in)) {
+    await Promise.all(li.map(async (svc) => {
+      const previous = snaps[svc.id];
       try {
         const u = await getUsage(svc.id);
-        snaps = { ...snaps, [svc.id]: u };
+        if (snaps[svc.id] === previous) snaps = { ...snaps, [svc.id]: u };
       } catch {
         /* preview */
       }
-    }
+    }));
   }
 
   // Re-read persisted settings on focus so a change here never saves a stale snapshot that would
@@ -102,13 +103,8 @@
   }
 
   onMount(async () => {
-    await initWindow();
-    try {
-      s = await getSettings();
-    } catch {
-      /* preview */
-    }
-    await refreshServices();
+    void initWindow().then((initial) => { if (initial && !s) s = initial; });
+    void refreshServices();
     try {
       unlisteners.push(
         await listen<UsageSnapshot>("usage://updated", (e) => {
@@ -216,17 +212,27 @@
 
   function onOrderDrop(e: DragEvent, index: number) {
     e.preventDefault();
-    if (dragIndex === null || dragIndex === index) {
-      dragIndex = null;
-      overIndex = null;
-      return;
-    }
+    if (dragIndex !== null) moveDockMember(dragIndex, index);
+    onOrderDragEnd();
+  }
+
+  function moveDockMember(from: number, to: number) {
+    if (!s?.dock.enabled || from === to || to < 0 || to >= dockOrder.length) return;
     const arr = [...dockOrder];
-    const [moved] = arr.splice(dragIndex, 1);
-    arr.splice(index, 0, moved);
+    const [moved] = arr.splice(from, 1);
+    if (!moved) return;
+    arr.splice(to, 0, moved);
     saveDock({ order: arr });
-    dragIndex = null;
-    overIndex = null;
+  }
+
+  async function moveWithButton(event: MouseEvent, from: number, to: number) {
+    const button = event.currentTarget as HTMLButtonElement;
+    const hadFocus = document.activeElement === button;
+    moveDockMember(from, to);
+    if (hadFocus) {
+      await tick();
+      button.focus({ preventScroll: true });
+    }
   }
 
   function onOrderDragEnd() {
@@ -282,12 +288,14 @@
                 type="button"
                 class="tbtn"
                 disabled={!dock.enabled || dock.columns <= 1}
+                aria-label={$t("dock.columns") + " −"}
                 onclick={() => saveDock({ columns: Math.max(1, dock.columns - 1) })}>−</button>
               <span class="stepperVal">{dock.columns}</span>
               <button
                 type="button"
                 class="tbtn"
                 disabled={!dock.enabled || dock.columns >= 6}
+                aria-label={$t("dock.columns") + " ＋"}
                 onclick={() => saveDock({ columns: Math.min(6, dock.columns + 1) })}>＋</button>
             </div>
           </div>
@@ -309,6 +317,14 @@
                 <span class="grip" aria-hidden="true">⠿</span>
                 <span class="orderIcon">{@html iconFor(id)}</span>
                 <span class="orderName">{dockMemberName(id)}</span>
+                <div class="orderActions">
+                  <button type="button" class="tbtn" disabled={!dock.enabled} aria-disabled={i === 0}
+                    aria-label={$t("dock.moveUp", { service: dockMemberName(id) })}
+                    onclick={(event) => void moveWithButton(event, i, i - 1)}>↑</button>
+                  <button type="button" class="tbtn" disabled={!dock.enabled} aria-disabled={i === dockOrder.length - 1}
+                    aria-label={$t("dock.moveDown", { service: dockMemberName(id) })}
+                    onclick={(event) => void moveWithButton(event, i, i + 1)}>↓</button>
+                </div>
               </div>
             {/each}
           </div>
@@ -664,6 +680,15 @@
   }
   .orderName {
     font-size: 0.82rem;
+  }
+  .orderActions {
+    display: flex;
+    gap: 4px;
+    margin-inline-start: auto;
+  }
+  .orderActions .tbtn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: default;
   }
   .hint {
     margin: 0;

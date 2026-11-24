@@ -166,6 +166,7 @@ fn build_snapshot(json: &str) -> Result<UsageSnapshot, AppError> {
         },
         fetched_at: now_iso(),
         status: "ok".to_string(),
+        antigravity_source: None,
     })
 }
 

@@ -26,6 +26,22 @@ impl Rect {
     }
 }
 
+/// Place a tray menu next to the click, inside that monitor's work area.
+pub fn tray_menu_bounds(area: Rect, x: i32, y: i32, w: u32, h: u32) -> Rect {
+    let w = i64::from(w).min(area.w);
+    let h = i64::from(h).min(area.h);
+    let x = i64::from(x);
+    let y = i64::from(y);
+    let left = if x - w >= area.x { x - w } else { x };
+    let top = if y - h >= area.y { y - h } else { y };
+    Rect {
+        x: left.clamp(area.x, area.right() - w),
+        y: top.clamp(area.y, area.bottom() - h),
+        w,
+        h,
+    }
+}
+
 /// Count visible pixels once, even when work areas overlap. Each vertical strip has a
 /// constant set of covering work areas; merge their clipped vertical intervals.
 fn visible_area(window: Rect, areas: &[Rect]) -> i64 {
@@ -132,6 +148,25 @@ mod tests {
 
     fn side_by_side() -> [Rect; 2] {
         [Rect::new(0, 0, 1920, 1040), Rect::new(1920, 0, 1920, 1040)]
+    }
+
+    #[test]
+    fn tray_menu_stays_on_a_secondary_monitor_above_the_taskbar() {
+        let area = Rect::new(-1920, -60, 1920, 1040);
+        let bounds = tray_menu_bounds(area, -40, 1010, 294, 255);
+        assert_eq!((bounds.x, bounds.y), (-334, 725));
+    }
+
+    #[test]
+    fn tray_menu_flips_at_top_left_and_shrinks_to_small_work_areas() {
+        let area = Rect::new(40, 28, 400, 300);
+        let flipped = tray_menu_bounds(area, 42, 14, 196, 170);
+        assert_eq!((flipped.x, flipped.y), (42, 28));
+        let oversized = tray_menu_bounds(area, 420, 300, 480, 320);
+        assert_eq!(
+            (oversized.x, oversized.y, oversized.w, oversized.h),
+            (40, 28, 400, 300)
+        );
     }
 
     #[test]

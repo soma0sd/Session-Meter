@@ -9,7 +9,6 @@
   import {
     getUsage,
     getHistory,
-    refreshNow,
     getServicesStatus,
     type UsageSnapshot,
     type HistoryPoint,
@@ -17,52 +16,69 @@
     type ServiceStatus,
   } from "../lib/ipc";
   import { formatCountdown, formatResetDateTime } from "../lib/countdown";
-  import { linePathT, areaPathT, mapY } from "../lib/charts";
+  import { linePathT, areaPathT, mapY, thinSeriesT, xAtTime } from "../lib/charts";
   import { forecast, type Forecast } from "../lib/forecast";
 
   const CW = 620;
   const CH = 150;
+  const CHART_PAD = 3;
+  const yTicks = [100, 75, 50, 25, 0];
+  type HistoryRange = "24h" | "7d" | "30d";
 
   let snap = $state<UsageSnapshot | null>(null);
   let history = $state<HistoryPoint[]>([]);
-  let range = $state<"24h" | "7d" | "30d">("24h");
+  let range = $state<HistoryRange>("24h");
+  let chartEnd = $state(Date.now());
+  let historyLoading = $state(false);
+  let selectedIndex = $state<number | null>(null);
   let now = $state(Date.now());
   let services = $state<ServiceStatus[]>([]);
   let activeService = $state("claude");
 
   let timer: number | undefined;
   let unlisteners: Array<() => void> = [];
+  let historyRequest = 0;
+  let serviceRequest = 0;
 
   const loggedIn = $derived(services.filter((x) => x.logged_in));
 
   async function loadHistory() {
+    const request = ++historyRequest;
+    const end = Date.now();
     try {
-      history = await getHistory(range, activeService);
+      const points = await getHistory(range, activeService);
+      if (request !== historyRequest) return;
+      history = points;
+      chartEnd = end;
     } catch {
-      history = [];
+      if (request === historyRequest) history = [];
+    } finally {
+      if (request === historyRequest) historyLoading = false;
     }
   }
 
-  // Load the active service's snapshot + history, then refresh in the background.
+  // The poller supplies new usage. Tab changes only ask for the locally available data.
   async function loadService() {
+    const request = ++serviceRequest;
+    const id = activeService;
+    const previous = snap;
+    historyLoading = true;
+    const historyRead = loadHistory();
     try {
-      snap = await getUsage(activeService);
+      const cached = await getUsage(id);
+      if (request === serviceRequest && snap === previous) snap = cached;
     } catch {
       /* preview */
     }
-    await loadHistory();
-    void refreshNow(activeService)
-      .then((s) => {
-        snap = s;
-        void loadHistory();
-      })
-      .catch(() => {});
+    await historyRead;
   }
 
   async function switchService(id: string) {
     if (id === activeService) return;
     activeService = id;
     snap = null;
+    history = [];
+    selectedIndex = null;
     await loadService();
   }
 
@@ -85,17 +101,9 @@
   }
 
   onMount(async () => {
-    await initWindow();
-    try {
-      services = await getServicesStatus();
-      const li = services.filter((x) => x.logged_in);
-      if (li.length && !li.some((x) => x.id === activeService)) {
-        activeService = li[0].id;
-      }
-    } catch {
-      /* preview */
-    }
-    await loadService();
+    void initWindow();
+    void refreshServices();
+    void loadService();
     try {
       unlisteners.push(
         await listen<UsageSnapshot>("usage://updated", (e) => {
@@ -125,9 +133,13 @@
     unlisteners.forEach((u) => u());
   });
 
-  async function setRange(r: "24h" | "7d" | "30d") {
+  function setRange(r: HistoryRange) {
+    if (range === r) return;
     range = r;
-    await loadHistory();
+    history = [];
+    historyLoading = true;
+    selectedIndex = null;
+    void loadHistory();
   }
 
   const localeTag = $derived($locale === "ko" ? "ko-KR" : "en-US");
@@ -135,48 +147,92 @@
     return formatResetDateTime(iso, localeTag, $t("common.today"), $t("common.tomorrow")) || "-";
   }
 
-  function seriesValues(key: "five_hour" | "weekly"): number[] {
-    return history.map((p) => p[key]).filter((v): v is number => v != null);
-  }
-  function seriesTimes(key: "five_hour" | "weekly"): number[] {
-    return history.filter((p) => p[key] != null).map((p) => Date.parse(p.at));
-  }
+  const samples = $derived(history
+    .map((point) => ({ ...point, time: Date.parse(point.at) }))
+    .filter((point) => Number.isFinite(point.time))
+    .sort((a, b) => a.time - b.time));
 
-  const fiveVals = $derived(seriesValues("five_hour"));
-  const weekVals = $derived(seriesValues("weekly"));
-  const fiveTimes = $derived(seriesTimes("five_hour"));
-  const weekTimes = $derived(seriesTimes("weekly"));
+  function series(key: "five_hour" | "weekly") {
+    const times: number[] = [];
+    const values: number[] = [];
+    for (const point of samples) {
+      const value = point[key];
+      if (value == null) continue;
+      times.push(point.time);
+      values.push(value);
+    }
+    return { times, values };
+  }
+  const primarySeries = $derived(series("five_hour"));
+  const secondarySeries = $derived(series("weekly"));
   const secondary = $derived.by(() => {
     const key = snap?.secondary_key;
     if (!snap || !key) return null;
     return snap.buckets.find((bucket) => bucket.key === key) ?? snap.weekly_primary;
   });
   const hasSecondary = $derived(secondary !== null);
-  const hasHistory = $derived(fiveVals.length >= 2 || (hasSecondary && weekVals.length >= 2));
+  const visibleSamples = $derived(samples.filter((p) => p.five_hour != null || (hasSecondary && p.weekly != null)));
+  const activeIndex = $derived(Math.min(selectedIndex ?? visibleSamples.length - 1, visibleSamples.length - 1));
+  const activeSample = $derived(visibleSamples[activeIndex]);
+  const hasHistory = $derived(visibleSamples.length > 0);
 
   // Chart time window: points are placed by real timestamp within [winStart, now], so each
   // range renders at its true scale (24h vs 7d vs 30d look different even with the same data).
   const rangeMs = $derived(
     range === "24h" ? 24 * 3_600_000 : range === "7d" ? 7 * 86_400_000 : 30 * 86_400_000,
   );
-  const winEnd = $derived(now);
+  const winEnd = $derived(chartEnd);
   const winStart = $derived(winEnd - rangeMs);
+  const primaryPlot = $derived(thinSeriesT(primarySeries.times, primarySeries.values, winStart, winEnd, CW));
+  const secondaryPlot = $derived(thinSeriesT(secondarySeries.times, secondarySeries.values, winStart, winEnd, CW));
+  const activeX = $derived(activeSample ? xAtTime(activeSample.time, winStart, winEnd, CW, CHART_PAD) : 0);
+  const primaryLabel = $derived(windowLabel(snap?.primary_key, "five_hour"));
+  const secondaryLabel = $derived(windowLabel(snap?.secondary_key, "seven_day"));
+  const sampleDate = $derived(activeSample ? new Intl.DateTimeFormat(localeTag, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(activeSample.time) : "");
+  const sampleDescription = $derived([
+    sampleDate,
+    activeSample?.five_hour == null ? "" : `${primaryLabel} ${activeSample.five_hour}%`,
+    !hasSecondary || activeSample?.weekly == null ? "" : `${secondaryLabel} ${activeSample.weekly}%`,
+  ].filter(Boolean).join(", "));
 
-  function fc(key: "five_hour" | "weekly", bucket: { remaining: number; resets_at: string } | null): Forecast {
-    if (!bucket) return { depleting: false, minutesToEmpty: null, beforeReset: false };
-    const resetMs = Math.max(0, Date.parse(bucket.resets_at) - now);
-    return forecast(seriesTimes(key), seriesValues(key), bucket.remaining, resetMs);
+  function selectPoint(event: PointerEvent) {
+    const rect = (event.currentTarget as SVGElement).getBoundingClientRect();
+    if (rect.width <= 0 || !visibleSamples.length) return;
+    const x = (event.clientX - rect.left) * CW / rect.width;
+    const fraction = Math.max(0, Math.min(1, (x - CHART_PAD) / (CW - 2 * CHART_PAD)));
+    const time = winStart + fraction * (winEnd - winStart);
+    let first = 0;
+    let last = visibleSamples.length - 1;
+    while (first < last) {
+      const middle = Math.floor((first + last) / 2);
+      if (visibleSamples[middle].time < time) first = middle + 1;
+      else last = middle;
+    }
+    selectedIndex = first > 0 && time - visibleSamples[first - 1].time <= visibleSamples[first].time - time
+      ? first - 1
+      : first;
   }
-  const fiveFc = $derived(fc("five_hour", snap?.five_hour ?? null));
+
+  function fc(data: ReturnType<typeof series>, bucket: { remaining: number } | null): Forecast {
+    if (!bucket) return { depleting: false, minutesToEmpty: null };
+    return forecast(data.times, data.values, bucket.remaining);
+  }
+  const fiveFc = $derived(fc(primarySeries, snap?.five_hour ?? null));
   const weekFc = $derived(
-    hasSecondary ? fc("weekly", secondary) : { depleting: false, minutesToEmpty: null, beforeReset: false },
+    fc(secondarySeries, secondary),
   );
 
-  function fcText(f: Forecast): string {
+  function fcText(f: Forecast, resetsAt: string | undefined): string {
     if (!f.depleting || f.minutesToEmpty == null) return $t("stats.forecast.stable");
     const time = formatCountdown(f.minutesToEmpty * 60000, $locale);
     const base = $t("stats.forecast.empties", { time });
-    return f.beforeReset ? `${base} (${$t("stats.forecast.beforeReset")})` : $t("stats.forecast.safe");
+    const resetMs = resetsAt ? Math.max(0, Date.parse(resetsAt) - now) : 0;
+    return f.minutesToEmpty * 60000 < resetMs
+      ? `${base} (${$t("stats.forecast.beforeReset")})`
+      : $t("stats.forecast.safe");
   }
 
   function barColor(remaining: number): string {
@@ -282,12 +338,13 @@
       <div class="panel-head">
         <h2>{$t("stats.history")}</h2>
         <div class="range">
-          <button class:active={range === "24h"} onclick={() => setRange("24h")}>24h</button>
-          <button class:active={range === "7d"} onclick={() => setRange("7d")}>7d</button>
-          <button class:active={range === "30d"} onclick={() => setRange("30d")}>30d</button>
+          {#each (["24h", "7d", "30d"] as const) as period}
+            <button class:active={range === period} aria-pressed={range === period} onclick={() => setRange(period)}>{period}</button>
+          {/each}
         </div>
       </div>
       {#if hasHistory}
+        <div class="axis-label">{$t("stats.historyRemaining")}</div>
         {#if axisTicks.length}
           <div class="axis">
             {#each axisTicks as tk (tk.frac)}
@@ -301,36 +358,60 @@
             {/each}
           </div>
         {/if}
-        <svg class="chart" viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" role="img" aria-label={$t("stats.history")}>
-          {#each [25, 50, 75] as g (g)}
-            <line x1="0" x2={CW} y1={mapY(g, CH, 3)} y2={mapY(g, CH, 3)} class="grid" />
-          {/each}
-          {#if hasSecondary && weekVals.length >= 2}
-            <path d={areaPathT(weekTimes, weekVals, winStart, winEnd, CW, CH)} class="area week" />
-            <path d={linePathT(weekTimes, weekVals, winStart, winEnd, CW, CH)} class="line week" />
-          {/if}
-          {#if fiveVals.length >= 2}
-            <path d={areaPathT(fiveTimes, fiveVals, winStart, winEnd, CW, CH)} class="area five" />
-            <path d={linePathT(fiveTimes, fiveVals, winStart, winEnd, CW, CH)} class="line five" />
-          {/if}
-        </svg>
+        <div class="plot">
+          <div class="y-axis" aria-hidden="true">
+            {#each yTicks as value}
+              <span style:top={`${mapY(value, CH, CHART_PAD)}px`}>{value}</span>
+            {/each}
+          </div>
+          <svg class="chart" viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" role="img"
+            aria-label={$t("stats.historyRemaining")} onpointermove={selectPoint} onpointerdown={selectPoint}>
+            {#each yTicks as g}
+              <line x1="0" x2={CW} y1={mapY(g, CH, CHART_PAD)} y2={mapY(g, CH, CHART_PAD)} class="grid" />
+            {/each}
+            {#if hasSecondary && secondaryPlot.values.length >= 2}
+              <path d={areaPathT(secondaryPlot.times, secondaryPlot.values, winStart, winEnd, CW, CH, CHART_PAD)} class="area week" />
+              <path d={linePathT(secondaryPlot.times, secondaryPlot.values, winStart, winEnd, CW, CH, CHART_PAD)} class="line week" />
+            {/if}
+            {#if primaryPlot.values.length >= 2}
+              <path d={areaPathT(primaryPlot.times, primaryPlot.values, winStart, winEnd, CW, CH, CHART_PAD)} class="area five" />
+              <path d={linePathT(primaryPlot.times, primaryPlot.values, winStart, winEnd, CW, CH, CHART_PAD)} class="line five" />
+            {/if}
+            {#if activeSample}
+              <line class="sample-marker" x1={activeX} x2={activeX} y1="0" y2={CH} />
+              {#if activeSample.five_hour != null}
+                <circle class="sample-point five" cx={activeX} cy={mapY(activeSample.five_hour, CH, CHART_PAD)} r="3" />
+              {/if}
+              {#if hasSecondary && activeSample.weekly != null}
+                <circle class="sample-point week" cx={activeX} cy={mapY(activeSample.weekly, CH, CHART_PAD)} r="3" />
+              {/if}
+            {/if}
+          </svg>
+        </div>
+        {#if visibleSamples.length > 1}
+          <input class="sample-slider" type="range" min="0" max={visibleSamples.length - 1} value={activeIndex}
+            aria-label={$t("stats.historySample")}
+            aria-valuetext={sampleDescription}
+            oninput={(event) => (selectedIndex = Number(event.currentTarget.value))} />
+        {/if}
         <div class="legend">
-          <span class="key"><i class="sw five"></i>{windowLabel(snap.primary_key, "five_hour")}</span>
+          <time datetime={activeSample?.at}>{sampleDate}</time>
+          <span class="key"><i class="sw five"></i>{primaryLabel} <strong>{activeSample?.five_hour == null ? "·" : `${activeSample.five_hour}%`}</strong></span>
           {#if hasSecondary}
-            <span class="key"><i class="sw week"></i>{windowLabel(snap.secondary_key, "seven_day")}</span>
+            <span class="key"><i class="sw week"></i>{secondaryLabel} <strong>{activeSample?.weekly == null ? "·" : `${activeSample.weekly}%`}</strong></span>
           {/if}
         </div>
       {:else}
-        <div class="nohist">{$t("stats.noHistory")}</div>
+        <div class="nohist">{$t(historyLoading ? "common.loading" : "stats.noHistory")}</div>
       {/if}
     </section>
 
     <section class="grid2">
       <div class="panel">
         <h2>{$t("stats.forecast")}</h2>
-        <div class="fc"><span class="fc-label">{windowLabel(snap.primary_key, "five_hour")}</span><span>{fcText(fiveFc)}</span></div>
+        <div class="fc"><span class="fc-label">{primaryLabel}</span><span>{fcText(fiveFc, snap.five_hour?.resets_at)}</span></div>
         {#if hasSecondary}
-          <div class="fc"><span class="fc-label">{windowLabel(snap.secondary_key, "seven_day")}</span><span>{fcText(weekFc)}</span></div>
+          <div class="fc"><span class="fc-label">{secondaryLabel}</span><span>{fcText(weekFc, secondary?.resets_at)}</span></div>
         {/if}
       </div>
       <div class="panel">
@@ -417,6 +498,7 @@
     color: rgb(var(--accent));
   }
   .axis {
+    margin-inline-start: 26px;
     position: relative;
     height: 13px;
     margin-top: 6px;
@@ -509,11 +591,48 @@
     color: rgb(var(--accent));
     border-color: rgb(var(--accent) / 0.4);
   }
+  .axis-label {
+    color: rgb(var(--fg-muted));
+    font-size: 0.72rem;
+    margin-top: 8px;
+  }
+  .plot {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    margin-top: 8px;
+  }
+  .y-axis {
+    position: relative;
+    color: rgb(var(--fg-muted));
+    font-size: 0.65rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .y-axis span {
+    position: absolute;
+    right: 6px;
+    transform: translateY(-50%);
+  }
   .chart {
     width: 100%;
     height: 150px;
-    margin-top: 8px;
     display: block;
+    cursor: crosshair;
+  }
+  .sample-marker {
+    stroke: rgb(var(--fg-muted));
+    vector-effect: non-scaling-stroke;
+  }
+  .sample-point.five {
+    fill: rgb(var(--accent));
+  }
+  .sample-point.week {
+    fill: rgb(var(--ok));
+  }
+  .sample-slider {
+    display: block;
+    width: calc(100% - 26px);
+    margin: 3px 0 0 auto;
+    accent-color: rgb(var(--accent));
   }
   .grid {
     stroke: rgb(var(--border));
@@ -542,6 +661,7 @@
   }
   .legend {
     display: flex;
+    flex-wrap: wrap;
     gap: 16px;
     margin-top: 6px;
     font-size: 0.72rem;

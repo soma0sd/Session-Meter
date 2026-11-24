@@ -21,6 +21,7 @@ pub struct AppState {
     /// Click, DoubleClick, Click; this lets a scheduled single-click suppress itself when
     /// it resolves just after a double-click (otherwise the widget toggles on stats open).
     pub last_double_ms: AtomicU64,
+    pub tray_menu: Mutex<crate::windows::TrayMenu>,
     pub notify_state: Mutex<NotifyState>,
     /// True while a login-capture watcher is running (prevents duplicates).
     pub login_watching: AtomicBool,
@@ -45,6 +46,7 @@ impl AppState {
             tray: Mutex::new(None),
             click_gen: AtomicU64::new(0),
             last_double_ms: AtomicU64::new(0),
+            tray_menu: Mutex::new(crate::windows::TrayMenu::default()),
             notify_state: Mutex::new(NotifyState::default()),
             login_watching: AtomicBool::new(false),
             login_capture_generation: AtomicU64::new(0),

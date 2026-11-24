@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(not(all(windows, feature = "microsoft-store")))]
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::api::UsageSnapshot;
@@ -33,6 +34,8 @@ pub struct ServiceStatus {
     /// before the first poll completes. `logged_in` is meaningless for a login-less service
     /// like Antigravity (always true); this is what the Settings account row shows instead.
     pub live_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub antigravity_source: Option<crate::api::AntigravitySource>,
 }
 
 #[tauri::command]
@@ -57,28 +60,21 @@ pub async fn refresh_now(
 
 /// Usage history within the retention window, optionally narrowed to "24h"/"7d"/"30d".
 #[tauri::command]
-pub fn get_history(
+pub async fn get_history(
     app: AppHandle,
     range: String,
     service: Option<String>,
-) -> Vec<crate::history::HistoryPoint> {
-    use time::{Duration, OffsetDateTime};
+) -> Result<Vec<crate::history::HistoryPoint>, String> {
     let service = crate::service::normalize(service.as_deref());
-    let mut points = crate::history::load(&app, &service);
-    let cutoff = match range.as_str() {
-        "24h" => Some(OffsetDateTime::now_utc() - Duration::hours(24)),
-        "7d" => Some(OffsetDateTime::now_utc() - Duration::days(7)),
-        "30d" => Some(OffsetDateTime::now_utc() - Duration::days(30)),
+    let range_hours = match range.as_str() {
+        "24h" => Some(24),
+        "7d" => Some(7 * 24),
+        "30d" => Some(30 * 24),
         _ => None,
     };
-    if let Some(c) = cutoff {
-        points.retain(|p| {
-            crate::history::parse_iso(&p.at)
-                .map(|t| t >= c)
-                .unwrap_or(false)
-        });
-    }
-    points
+    tauri::async_runtime::spawn_blocking(move || crate::history::load(&app, &service, range_hours))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -132,18 +128,36 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Se
 }
 
 #[tauri::command]
-pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let manager = app.autolaunch();
-    if enabled {
-        manager.enable().map_err(|e| e.to_string())
-    } else {
-        manager.disable().map_err(|e| e.to_string())
+pub async fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(all(windows, feature = "microsoft-store"))]
+    {
+        let _ = app;
+        tauri::async_runtime::spawn_blocking(move || crate::store_startup::set_enabled(enabled))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+    #[cfg(not(all(windows, feature = "microsoft-store")))]
+    {
+        let manager = app.autolaunch();
+        if enabled {
+            manager.enable().map_err(|error| error.to_string())
+        } else {
+            manager.disable().map_err(|error| error.to_string())
+        }
     }
 }
 
 #[tauri::command]
-pub fn get_autostart(app: AppHandle) -> bool {
-    app.autolaunch().is_enabled().unwrap_or(false)
+pub async fn get_autostart(app: AppHandle) -> Result<bool, String> {
+    #[cfg(all(windows, feature = "microsoft-store"))]
+    {
+        let _ = app;
+        tauri::async_runtime::spawn_blocking(crate::store_startup::is_enabled)
+            .await
+            .map_err(|error| error.to_string())?
+    }
+    #[cfg(not(all(windows, feature = "microsoft-store")))]
+    app.autolaunch().is_enabled().map_err(|error| error.to_string())
 }
 
 // --- auto-update (GitHub-based) ---
@@ -151,12 +165,18 @@ pub fn get_autostart(app: AppHandle) -> bool {
 /// Check the update endpoint; returns whether a newer signed release is available.
 #[tauri::command]
 pub async fn check_for_update(app: AppHandle) -> Result<crate::update::UpdateInfo, String> {
+    if crate::MICROSOFT_STORE_BUILD {
+        return Err("Updates are managed by Microsoft Store".into());
+    }
     crate::update::check(&app).await
 }
 
 /// Download + install the pending update and relaunch.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    if crate::MICROSOFT_STORE_BUILD {
+        return Err("Updates are managed by Microsoft Store".into());
+    }
     crate::update::install(&app).await
 }
 
@@ -164,6 +184,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn get_update_state(state: State<'_, AppState>) -> Option<crate::update::UpdateInfo> {
     state.update_available.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn is_microsoft_store_build() -> bool {
+    crate::MICROSOFT_STORE_BUILD
 }
 
 /// Open the "what's new" (changelog) window.
@@ -218,10 +243,19 @@ pub fn get_session_status(
 
 /// Login status + identity for every known service (logged-in or not).
 #[tauri::command]
-pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<ServiceStatus> {
+pub async fn get_services_status(app: AppHandle) -> Result<Vec<ServiceStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || collect_services_status(&app))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn collect_services_status(app: &AppHandle) -> Vec<ServiceStatus> {
+    let Some(state) = app.try_state::<AppState>() else {
+        return Vec::new();
+    };
     // Snapshot each service's identity + plan + live status, then drop the lock before
     // touching settings.
-    let snap_info: std::collections::HashMap<String, (String, String, String, String)> = {
+    let snap_info = {
         let snaps = state.last_snapshot.lock().unwrap();
         snaps
             .iter()
@@ -233,16 +267,17 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
                         s.account_email.clone(),
                         s.subscription.clone(),
                         s.status.clone(),
+                        s.antigravity_source,
                     ),
                 )
             })
-            .collect()
+            .collect::<std::collections::HashMap<_, _>>()
     };
     crate::service::all()
         .iter()
         .map(|&id| {
-            let logged_in = crate::service::has_session(&app, id);
-            let (snap_org, snap_email, subscription, live_status) =
+            let logged_in = crate::service::has_session(app, id);
+            let (snap_org, snap_email, subscription, live_status, antigravity_source) =
                 snap_info.get(id).cloned().unwrap_or_default();
             // Claude's identity is persisted in settings (captured on login). Other services
             // (Gemini) carry theirs on the snapshot: the email is best-effort from the sign-in
@@ -262,6 +297,7 @@ pub fn get_services_status(app: AppHandle, state: State<'_, AppState>) -> Vec<Se
                 email,
                 subscription,
                 live_status,
+                antigravity_source,
             }
         })
         .collect()
@@ -534,24 +570,33 @@ pub fn set_dock_config(
     state: State<'_, AppState>,
     patch: DockConfigPatch,
 ) -> Result<(), String> {
-    let updated = {
+    let (updated, layout_changed, layering_changed) = {
         let mut settings = state.settings.lock().unwrap();
-        settings.dock.enabled = patch.enabled;
-        settings.dock.columns = patch.columns.clamp(1, 12);
-        settings.dock.order = patch.order;
-        settings.dock.opacity = patch.opacity.clamp(0.2, 1.0);
-        settings.dock.always_on_top = patch.always_on_top;
-        settings.dock.move_lock = patch.move_lock;
-        config::save(&app, &settings).map_err(|e| e.to_string())?;
-        settings.clone()
+        let layout_changed =
+            settings.dock.enabled != patch.enabled || settings.dock.order != patch.order;
+        let layering_changed = settings.dock.always_on_top != patch.always_on_top;
+        let mut next = settings.clone();
+        next.dock.enabled = patch.enabled;
+        next.dock.columns = patch.columns.clamp(1, 12);
+        next.dock.order = patch.order;
+        next.dock.opacity = patch.opacity.clamp(0.2, 1.0);
+        next.dock.always_on_top = patch.always_on_top;
+        next.dock.move_lock = patch.move_lock;
+        config::save(&app, &next).map_err(|e| e.to_string())?;
+        *settings = next.clone();
+        (next, layout_changed, layering_changed)
     };
-    if let Some(win) = app.get_webview_window(windows::DOCK_LABEL) {
-        windows::apply_layering(&win, updated.dock.always_on_top);
+    if layering_changed {
+        if let Some(win) = app.get_webview_window(windows::DOCK_LABEL) {
+            windows::apply_layering(&win, updated.dock.always_on_top);
+        }
     }
     let _ = app.emit("settings://changed", &updated);
     // Turning docking on/off, or changing who is in it, moves services between their own
     // windows and the docked one. Synchronous command, so this is already the main thread.
-    windows::reconcile_widget_visibility(&app);
+    if layout_changed {
+        windows::reconcile_widget_visibility(&app);
+    }
     Ok(())
 }
 

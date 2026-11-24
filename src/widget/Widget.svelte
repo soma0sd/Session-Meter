@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
-  import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWindow, monitorFromPoint } from "@tauri-apps/api/window";
+  import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
   import { listen } from "@tauri-apps/api/event";
   import { t } from "../lib/i18n";
   import { initWindow } from "../lib/appinit";
@@ -125,7 +126,10 @@
   let updateInfo = $state<UpdateInfo | null>(null);
   let updating = $state(false);
   let menuOpen = $state(false);
-  let menuOpensUp = $state(false);
+  let menuSide = $state<"up" | "down" | "inside">("down");
+  let menuMaxHeight = $state<number | undefined>();
+  let menuReady = $state(false);
+  let menuButton = $state<HTMLButtonElement | undefined>();
   let menuTopInset = $state(0);
   let contentWidth = $state(0);
   // Show the icon row inline when the content is wide enough; otherwise collapse to a menu.
@@ -137,11 +141,14 @@
   let menuEl = $state<HTMLElement | undefined>(undefined);
   let contentEl: HTMLElement | undefined;
   let ro: ResizeObserver | undefined;
-  let contentRo: ResizeObserver | undefined;
   let timer: number | undefined;
   let unlisteners: Array<() => void> = [];
   let nativeTopInsetPx = 0;
-  let fitRevision = 0;
+  let fitScheduled = false;
+  let fitting = false;
+  let fitPending = false;
+  let lastSize: [number, number, number] | undefined;
+  const loadingSnaps = new Set<string>();
 
   function cellConfig(service: string): WidgetConfig {
     return settings ? widgetConfig(settings, service) : defaultWidgetConfig();
@@ -181,92 +188,95 @@
   // Pull the cached snapshot of every listed service this window has not seen yet (a member
   // that just joined the docked window, say). Later updates arrive over `usage://updated`.
   async function loadSnaps(list: string[]) {
-    for (const svc of list) {
-      if (svc in snaps) continue;
-      const s = await retryInvoke(() => getUsage(svc));
-      if (s !== undefined) snaps = { ...snaps, [svc]: s };
-    }
+    await Promise.all(list.map(async (svc) => {
+      if (svc in snaps || loadingSnaps.has(svc)) return;
+      loadingSnaps.add(svc);
+      try {
+        const s = await retryInvoke(() => getUsage(svc));
+        if (s !== undefined && !(svc in snaps)) snaps = { ...snaps, [svc]: s };
+      } finally {
+        loadingSnaps.delete(svc);
+      }
+    }));
   }
 
-  async function preferUpwardMenu(panelH: number): Promise<boolean> {
-    if (!menuEl) return false;
-    try {
-      const [position, monitor] = await Promise.all([
-        getCurrentWindow().outerPosition(),
-        currentMonitor(),
-      ]);
-      if (!monitor) return false;
-      const scale = monitor.scaleFactor || window.devicePixelRatio || 1;
-      const workArea = monitor.workArea;
-      // The popover sits entirely outside the panel (below it, or above it when flipped), so
-      // either direction needs the same amount of extra room: its own height plus the gap.
-      const extra = Math.max(0, Math.ceil((menuEl.getBoundingClientRect().height + MENU_GAP) * scale));
-      const availableBelow = workArea.position.y + workArea.size.height - (position.y + Math.ceil(panelH * scale));
-      const availableAbove = position.y - workArea.position.y;
-      return extra > availableBelow && availableAbove >= extra;
-    } catch {
-      return false;
-    }
-  }
-
-  async function setNativeTopInset(inset: number) {
-    const nextInsetPx = Math.round(inset * (window.devicePixelRatio || 1));
-    const delta = nextInsetPx - nativeTopInsetPx;
-    if (!delta) return;
-    const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
-    const appWindow = getCurrentWindow();
-    const position = await appWindow.outerPosition();
-    await appWindow.setPosition(new PhysicalPosition(position.x, position.y - delta));
-    nativeTopInsetPx = nextInsetPx;
-  }
-
-  // Size the native window to the visual union of the normal panel and absolute popover.
-  // An upward menu receives transparent top space and shifts its native window by the same
-  // amount, so the panel's desktop coordinates remain fixed while the popover stays visible.
   async function fitWindow() {
     if (!panelEl) return;
-    const revision = ++fitRevision;
     if (contentEl) contentWidth = Math.ceil(contentEl.getBoundingClientRect().width);
-    let r = panelEl.getBoundingClientRect();
-    const panelW = Math.min(maxW, Math.ceil(r.width));
-    const panelH = Math.ceil(r.height);
+    const rect = panelEl.getBoundingClientRect();
+    const panelW = Math.ceil(rect.width);
+    const panelH = Math.ceil(rect.height);
     if (panelW < 40 || panelH < 30) return;
 
-    const shouldOpenUp = menuOpen && (await preferUpwardMenu(panelH));
-    if (revision !== fitRevision) return;
-    if (menuOpensUp !== shouldOpenUp) {
-      menuOpensUp = shouldOpenUp;
-      await tick();
-      if (revision !== fitRevision || !panelEl) return;
-      r = panelEl.getBoundingClientRect();
-    }
-
-    const menuRect = menuOpen && menuEl ? menuEl.getBoundingClientRect() : undefined;
-    const desiredTopInset = menuRect && menuOpensUp ? Math.max(0, Math.ceil(r.top - menuRect.top)) : 0;
-    if (menuTopInset !== desiredTopInset) {
-      menuTopInset = desiredTopInset;
-      await tick();
-      if (revision !== fitRevision || !panelEl) return;
-      r = panelEl.getBoundingClientRect();
-    }
-
-    const popover = menuOpen && menuEl ? menuEl.getBoundingClientRect() : undefined;
-    const visualTop = popover ? Math.min(r.top, popover.top) : r.top;
-    const visualBottom = popover ? Math.max(r.bottom, popover.bottom) : r.bottom;
-    // The popover's labels are `nowrap` and can be wider than the panel that anchors it, so
-    // the window has to widen for it too - otherwise the menu text is cut off at the window
-    // edge. The panel itself is `width: max-content`, so the extra width stays transparent.
-    const visualRight = popover ? Math.max(r.right, popover.right) : r.right;
-    const w = Math.min(maxW, Math.max(panelW, Math.ceil(visualRight - r.left)));
-    const h = Math.max(panelH, Math.ceil(visualBottom - visualTop));
+    const popover = menuOpen ? menuEl : undefined;
+    const scale = window.devicePixelRatio || 1;
     try {
-      const { LogicalSize } = await import("@tauri-apps/api/dpi");
-      await setNativeTopInset(menuTopInset);
-      if (revision !== fitRevision) return;
-      await getCurrentWindow().setSize(new LogicalSize(w, h));
+      const win = getCurrentWindow();
+      let extra = 0;
+      if (popover) {
+        const position = await win.outerPosition();
+        const panelY = position.y + nativeTopInsetPx;
+        const monitor = await monitorFromPoint(position.x + panelW * scale / 2, panelY + panelH * scale / 2);
+        if (!menuOpen || menuEl !== popover) return;
+        menuSide = "down";
+        menuMaxHeight = undefined;
+        if (monitor) {
+          const area = monitor.workArea;
+          const above = (panelY - area.position.y) / scale - MENU_GAP;
+          const below = (area.position.y + area.size.height - panelY) / scale - panelH - MENU_GAP;
+          const desired = popover.scrollHeight + popover.offsetHeight - popover.clientHeight;
+          if (desired > below && above > below) menuSide = "up";
+          const available = menuSide === "up" ? above : below;
+          if (desired > available) {
+            if (available < 60) menuSide = "inside";
+            else menuMaxHeight = Math.floor(available);
+          }
+        }
+        await tick();
+        if (!menuOpen || menuEl !== popover) return;
+        // The inner fallback scrolls inside the widget when neither side has room.
+        if (menuSide !== "inside") extra = MENU_GAP + Math.ceil(popover.getBoundingClientRect().height);
+      }
+      const inset = popover && menuSide === "up" ? extra : 0;
+      const nextInset = Math.round(inset * scale);
+      if (nextInset !== nativeTopInsetPx) {
+        // Shrink before restoring the origin, so the bounds watchdog sees the panel
+        // at its normal size. On open, move first and grow into the free space.
+        if (nextInset < nativeTopInsetPx) {
+          await win.setSize(new LogicalSize(panelW, panelH));
+          lastSize = [panelW, panelH, scale];
+        }
+        const position = await win.outerPosition();
+        await win.setPosition(new PhysicalPosition(position.x, position.y + nativeTopInsetPx - nextInset));
+        nativeTopInsetPx = nextInset;
+      }
+      menuTopInset = inset;
+      const height = panelH + extra;
+      if (!lastSize || lastSize[0] !== panelW || lastSize[1] !== height || lastSize[2] !== scale) {
+        await win.setSize(new LogicalSize(panelW, height));
+        lastSize = [panelW, height, scale];
+      }
     } catch {
-      /* not in Tauri */
+      /* Browser preview has no native window to fit. */
+    } finally {
+      if (popover && menuEl === popover && menuOpen) menuReady = true;
     }
+  }
+
+  function requestFit() {
+    fitPending = true;
+    if (fitScheduled || fitting) return;
+    fitScheduled = true;
+    queueMicrotask(() => {
+      fitScheduled = false;
+      if (!fitPending) return;
+      fitting = true;
+      fitPending = false;
+      void fitWindow().finally(() => {
+        fitting = false;
+        if (fitPending) requestFit();
+      });
+    });
   }
 
   // The kebab menu only exists in the collapsed header; close it when expanding.
@@ -281,23 +291,31 @@
     menuOpen;
     collapsed;
     columns;
-    void fitWindow();
+    requestFit();
+  });
+
+  $effect(() => {
+    const popover = menuEl;
+    if (!popover || !("ResizeObserver" in window)) return;
+    const observer = new ResizeObserver(requestFit);
+    observer.observe(popover);
+    return () => observer.disconnect();
   });
 
   onMount(async () => {
-    await initWindow();
-    const initialSettings = await retryInvoke(() => getSettings());
-    if (initialSettings !== undefined) applySettings(initialSettings);
-    if (isGroup) {
-      const initialMembers = await retryInvoke(() => getDockMembers());
-      if (initialMembers !== undefined) members = initialMembers;
+    void initWindow().then(async (initial) => {
+      const current = initial ?? await retryInvoke(() => getSettings());
+      if (current && !settings) applySettings(current);
+    });
+    if ("ResizeObserver" in window) {
+      ro = new ResizeObserver(requestFit);
+      if (panelEl) ro.observe(panelEl);
+      if (contentEl) ro.observe(contentEl);
     }
-    await loadSnaps(cells);
-    try {
-      updateInfo = await getUpdateState();
-    } catch {
-      /* preview */
-    }
+    requestFit();
+    timer = window.setInterval(() => (now = Date.now()), 1000);
+    if (!isGroup) void loadSnaps([myService]);
+    let membersChanged = false;
     try {
       unlisteners.push(
         await listen<UsageSnapshot>("usage://updated", (e) => {
@@ -315,12 +333,13 @@
       if (isGroup) {
         unlisteners.push(
           await listen<string[]>("dock://members", (e) => {
+            membersChanged = true;
             members = e.payload;
             void loadSnaps(e.payload);
           }),
         );
       }
-      unlisteners.push(await getCurrentWindow().onScaleChanged(() => void fitWindow()));
+      unlisteners.push(await getCurrentWindow().onScaleChanged(requestFit));
       unlisteners.push(
         await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
           if (!focused) menuOpen = false;
@@ -329,26 +348,20 @@
     } catch {
       /* preview */
     }
-    if ("ResizeObserver" in window) {
-      if (panelEl) {
-        ro = new ResizeObserver(() => void fitWindow());
-        ro.observe(panelEl);
-      }
-      // The content can change width without the panel doing so (when the header is the
-      // wider of the two), and `collapsed` has to follow the content.
-      if (contentEl) {
-        contentRo = new ResizeObserver(() => void fitWindow());
-        contentRo.observe(contentEl);
+    void getUpdateState().then((info) => { if (!updateInfo) updateInfo = info; }).catch(() => {});
+    if (isGroup) {
+      const initialMembers = await retryInvoke(() => getDockMembers());
+      if (initialMembers && !membersChanged) {
+        members = initialMembers;
+        void loadSnaps(initialMembers);
       }
     }
-    void fitWindow();
-    timer = window.setInterval(() => (now = Date.now()), 1000);
   });
 
   onDestroy(() => {
     if (timer) clearInterval(timer);
+    fitPending = false;
     ro?.disconnect();
-    contentRo?.disconnect();
     unlisteners.forEach((u) => u());
   });
 
@@ -409,6 +422,7 @@
 
   function toggleMenu(e: MouseEvent) {
     e.stopPropagation();
+    menuReady = false;
     menuOpen = !menuOpen;
   }
 
@@ -452,6 +466,13 @@
   }
 </script>
 
+<svelte:window onkeydown={(event) => {
+  if (event.key === "Escape" && menuOpen) {
+    menuOpen = false;
+    menuButton?.focus();
+  }
+}} />
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="widget-surface" style:padding-top={menuTopInset ? `${menuTopInset}px` : undefined}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -476,8 +497,10 @@
         <button
           class="kebab"
           class:on={menuOpen}
+          bind:this={menuButton}
           title={$t("common.settings")}
           aria-label={$t("common.settings")}
+          aria-expanded={menuOpen}
           onclick={toggleMenu}>{@html KEBAB}</button>
       {:else}
         <div class="tools">
@@ -499,7 +522,9 @@
     </header>
 
     {#if collapsed && menuOpen}
-      <div class="menu" class:up={menuOpensUp} bind:this={menuEl}>
+      <div class="menu" class:up={menuSide === "up"} class:inside={menuSide === "inside"} bind:this={menuEl}
+        style:max-height={menuMaxHeight === undefined ? undefined : `${menuMaxHeight}px`}
+        style:visibility={menuReady ? undefined : "hidden"}>
         {#if updateInfo?.available}
           <button class="mitem accent" disabled={updating} onclick={() => nav(doUpdate)}>
             {@html UPDATE}<span>{$t("widget.update", { version: updateInfo.version })}</span>
@@ -646,21 +671,13 @@
     opacity: 0.6;
   }
   .menu {
-    /* Anchored to `.panel` (which is `position: relative` for exactly this reason). Without
-       that, the containing block is the window itself, and the transparent top inset that
-       `fitWindow` adds for an upward popover moves the panel while leaving the popover
-       behind - it then hangs above y=0 and everything but its last row is clipped away by
-       the window edge. */
+    /* Stay within the panel width so opening the menu cannot push the window sideways. */
     position: absolute;
     z-index: 10;
-    /* The 4px offsets here and on `.menu.up` mirror the `MENU_GAP` script constant. */
-    top: calc(100% + 4px);
-    left: 0;
-    /* Sized to its own labels, never narrower than the panel; `fitWindow` widens the window
-       to match so nothing is cut off. */
-    min-width: 100%;
-    width: max-content;
-    max-width: 340px;
+    top: calc(100% + 5px); /* 4px gap past the 1px panel border. */
+    left: -1px;
+    right: -1px;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -672,11 +689,16 @@
   }
   .menu.up {
     top: auto;
-    bottom: calc(100% + 4px);
+    bottom: calc(100% + 5px);
     box-shadow: 0 -8px 22px rgb(0 0 0 / 0.22);
+  }
+  .menu.inside {
+    top: 0;
+    max-height: 100%;
   }
   .mitem {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
@@ -687,7 +709,7 @@
     font-size: 0.76rem;
     text-align: left;
     cursor: default;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
   .mitem:hover {
     background: rgb(var(--accent) / 0.14);

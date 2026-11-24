@@ -355,6 +355,7 @@ fn parse_snapshot(raw: &Value) -> Result<UsageSnapshot, AppError> {
         subscription: String::new(),
         fetched_at: now_iso(),
         status: "ok".to_string(),
+        antigravity_source: None,
     })
 }
 
@@ -446,7 +447,9 @@ async fn fetch_from_agy() -> Result<UsageSnapshot, AppError> {
     let data = tauri::async_runtime::spawn_blocking(run_agy_usage)
         .await
         .map_err(|e| AppError::Other(e.to_string()))??;
-    parse_snapshot(&data).map_err(|_| AppError::NotRunning)
+    let mut snapshot = parse_snapshot(&data).map_err(|_| AppError::NotRunning)?;
+    snapshot.antigravity_source = Some(crate::api::AntigravitySource::Cli);
+    Ok(snapshot)
 }
 
 // --- entry points ---
@@ -468,6 +471,7 @@ async fn fetch_from_ide() -> Result<UsageSnapshot, AppError> {
     }
     let (raw, scheme, port, token) = probe_and_fetch(&candidates).await?;
     let mut snapshot = parse_snapshot(&raw)?;
+    snapshot.antigravity_source = Some(crate::api::AntigravitySource::Ide);
     // The quota numbers are the point of this service; a signed-in account is a nice-to-have
     // for the Settings row, so a failure here (wrong guess at the endpoint/schema, or this IDE
     // version just not exposing it) is silently swallowed rather than failing the whole poll.

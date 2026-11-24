@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.7.0] - 2026-11-24
+
+### Added
+
+- Up and down buttons reorder docked widgets, including when using a keyboard.
+- History charts show a quota-remaining scale. A pointer or keyboard can select a timestamp to display the recorded values.
+- Settings distinguish an active Antigravity IDE connection from usage fetched through the CLI.
+
+### Changed
+
+- Statistics tabs start with cached usage and load history in the background. Widgets load service data in parallel and avoid resizing when their dimensions stay the same.
+
+### Fixed
+
+- Failed update checks show an error and a retry button.
+- The tray menu stays in the work area of the clicked monitor. The widget overflow menu opens where space is available and scrolls when needed.
+- Reopening Settings, Statistics, or Widget Style restores an off-screen window after a monitor change.
+
 ## [1.6.0] - 2026-10-31
 
 ### Changed

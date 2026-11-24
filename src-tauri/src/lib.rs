@@ -17,6 +17,8 @@ mod placement;
 mod poller;
 mod service;
 mod state;
+#[cfg(all(windows, feature = "microsoft-store"))]
+mod store_startup;
 mod theme;
 mod tray;
 mod update;
@@ -26,6 +28,8 @@ mod windows;
 use tauri::{Manager, WindowEvent};
 
 use state::AppState;
+
+const MICROSOFT_STORE_BUILD: bool = cfg!(all(windows, feature = "microsoft-store"));
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -53,22 +57,25 @@ pub fn run() {
         return;
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Register single-instance FIRST so a second launch focuses the existing app.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(win) = app.get_webview_window("settings") {
-                let _ = win.show();
-                let _ = win.set_focus();
-            }
+            windows::open_settings(app);
         }))
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_positioner::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_positioner::init());
+    let builder = if MICROSOFT_STORE_BUILD {
+        builder
+    } else {
+        builder
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))
+            .plugin(tauri_plugin_updater::Builder::new().build())
+    };
+    builder
         .setup(|app| {
             let handle = app.handle().clone();
             // One-time: migrate the renamed Antigravity->Gemini service's persisted files
@@ -85,7 +92,9 @@ pub fn run() {
             // reboot kept relaunching that stale old version while the real install updated fine.)
             // On startup, if autostart is enabled, re-register so the stored path is rewritten to
             // THIS process's exe (captured by the plugin at init = the real install path).
-            heal_autostart(&handle);
+            if !MICROSOFT_STORE_BUILD {
+                heal_autostart(&handle);
+            }
 
             tray::build_tray(&handle)?;
 
@@ -115,7 +124,9 @@ pub fn run() {
 
             // Check GitHub for a newer signed release on startup and every 10 minutes; the UI
             // surfaces it via the `update://available` event (silent if offline / no release yet).
-            update::start_periodic(&handle);
+            if !MICROSOFT_STORE_BUILD {
+                update::start_periodic(&handle);
+            }
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -173,6 +184,7 @@ pub fn run() {
             commands::check_for_update,
             commands::install_update,
             commands::get_update_state,
+            commands::is_microsoft_store_build,
             commands::open_news_window,
             commands::get_changelog,
             commands::get_session_status,
@@ -183,6 +195,7 @@ pub fn run() {
             commands::open_settings_window,
             commands::open_stats_window,
             commands::open_style_window,
+            windows::fit_tray_menu,
             commands::toggle_widget,
             commands::quit_app,
             commands::set_theme,

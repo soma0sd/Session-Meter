@@ -81,3 +81,29 @@ export function areaPathT(
   const firstX = xAtTime(times[0], t0, t1, w, pad);
   return `${line} L ${lastX.toFixed(1)} ${(h - pad).toFixed(1)} L ${firstX.toFixed(1)} ${(h - pad).toFixed(1)} Z`;
 }
+
+// Keep the first, last and extreme samples per chart column. A short quota
+// reset or drop still appears, even when a long range has many samples per pixel.
+export function thinSeriesT(times: number[], values: number[], start: number, end: number, width: number) {
+  if (times.length <= 2 * width) return { times, values };
+  const sampled = { times: [] as number[], values: [] as number[] };
+  let first = 0;
+  while (first < times.length) {
+    const column = Math.floor(xAtTime(times[first], start, end, width));
+    let min = first;
+    let max = first;
+    let next = first + 1;
+    while (next < times.length && Math.floor(xAtTime(times[next], start, end, width)) === column) {
+      if (values[next] < values[min]) min = next;
+      if (values[next] > values[max]) max = next;
+      next++;
+    }
+    const indices = [...new Set([first, min, max, next - 1])].sort((a, b) => a - b);
+    for (const i of indices) {
+      sampled.times.push(times[i]);
+      sampled.values.push(values[i]);
+    }
+    first = next;
+  }
+  return sampled;
+}

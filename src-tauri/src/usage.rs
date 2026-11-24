@@ -62,8 +62,10 @@ pub fn mark_status(app: &AppHandle, service: &str, status: &str) {
                 subscription: String::new(),
                 fetched_at: crate::api::now_iso(),
                 status: status.to_string(),
+                antigravity_source: None,
             });
         snapshot.status = status.to_string();
+        snapshot.antigravity_source = None;
         snapshot.clone()
     };
     let _ = app.emit("usage://updated", &snapshot);
