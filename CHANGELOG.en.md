@@ -22,6 +22,10 @@ All notable changes to this project are documented here. The format is based on
 - The tray menu stays in the work area of the clicked monitor. The widget overflow menu opens where space is available and scrolls when needed.
 - Reopening Settings, Statistics, or Widget Style restores an off-screen window after a monitor change.
 
+### Security
+
+- Removed ZIP handling from the signed NSIS updater and applied security patches for Rustls and Vite.
+
 ## [1.6.0] - 2026-10-31
 
 ### Changed

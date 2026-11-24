@@ -51,6 +51,11 @@ New-Item -ItemType Directory -Path $assets -Force | Out-Null
 try {
     Copy-Item -LiteralPath (Join-Path $target 'release\sessionmeter.exe') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $root 'LICENSE'), (Join-Path $root 'THIRD_PARTY_LICENSES.md') -Destination $stage
+    $licenses = Join-Path $stage 'licenses'
+    New-Item -ItemType Directory -Path $licenses | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root 'src\assets\fonts\Noto-Sans-OFL.txt'),
+        (Join-Path $root 'src\assets\fonts\Noto-Sans-KR-OFL.txt') -Destination $licenses
+    Copy-Item -LiteralPath (Join-Path $root 'src-tauri\assets\fonts\OFL.txt') -Destination (Join-Path $licenses 'tray-digits-OFL.txt')
 
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'AppxManifest.template.xml')
     $values = @{
@@ -105,10 +110,12 @@ try {
     }
 
     $priConfig = Join-Path $temp 'priconfig.xml'
+    $priFile = Join-Path $temp 'resources.pri'
     & $makePri createconfig /cf $priConfig /dq ko-KR_en-US
     if ($LASTEXITCODE) { throw 'MakePri config generation failed.' }
-    & $makePri new /pr $stage /cf $priConfig /mn $manifestPath /of (Join-Path $stage 'resources.pri')
+    & $makePri new /pr $stage /cf $priConfig /mn $manifestPath /of $priFile
     if ($LASTEXITCODE) { throw 'MakePri resource generation failed.' }
+    Move-Item -LiteralPath $priFile -Destination $stage
     & $makeAppx pack /d $stage /p $package
     if ($LASTEXITCODE) { throw 'MakeAppx packaging failed.' }
     Get-Item -LiteralPath $package | Select-Object FullName, Length
