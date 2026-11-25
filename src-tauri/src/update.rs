@@ -4,11 +4,11 @@
 //! `plugins.updater.pubkey` in tauri.conf.json, and the private key signs release artifacts
 //! in CI (`TAURI_SIGNING_PRIVATE_KEY`). On startup we check the GitHub `releases/latest`
 //! manifest (`latest.json`) and emit `update://available` when a newer signed release
-//! exists; the Settings window also offers a manual check + install.
+//! exists. Users can install it manually or enable automatic installation in Settings.
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::state::AppState;
 
@@ -21,60 +21,94 @@ pub struct UpdateInfo {
 
 /// Query the update endpoint. Returns availability + the new version/notes when one exists.
 pub async fn check(app: &AppHandle) -> Result<UpdateInfo, String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
-    match updater.check().await.map_err(|e| e.to_string())? {
-        Some(update) => Ok(UpdateInfo {
-            available: true,
-            version: update.version.clone(),
-            notes: update.body.clone().unwrap_or_default(),
-        }),
-        None => Ok(UpdateInfo {
+    Ok(match find_update(app).await? {
+        Some(update) => update_info(&update),
+        None => UpdateInfo {
             available: false,
             version: String::new(),
             notes: String::new(),
-        }),
+        },
+    })
+}
+
+async fn find_update(app: &AppHandle) -> Result<Option<Update>, String> {
+    app.updater_builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn update_info(update: &Update) -> UpdateInfo {
+    UpdateInfo {
+        available: true,
+        version: update.version.clone(),
+        notes: update.body.clone().unwrap_or_default(),
     }
 }
 
-/// Download + install the pending update, then relaunch. Returns only when no update exists.
+/// Install the available GitHub update on request.
 pub async fn install(app: &AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
-    if let Some(update) = updater.check().await.map_err(|e| e.to_string())? {
-        update
-            .download_and_install(|_, _| {}, || {})
-            .await
-            .map_err(|e| e.to_string())?;
-        // Flush widget position(s) before the updater relaunches us. The widget is hidden
-        // during teardown, so without this the last on-screen position is lost and the
-        // widget returns to its default corner after the update+restart.
+    let state = app.state::<AppState>();
+    let _install = state.update_install.lock().await;
+    if let Some(update) = find_update(app).await? {
+        install_release(app, &update, || true).await?;
+    }
+    Ok(())
+}
+
+async fn install_release(
+    app: &AppHandle,
+    update: &Update,
+    should_install: impl FnOnce() -> bool,
+) -> Result<(), String> {
+    // The updater verifies the release signature before returning the bytes.
+    let installer = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    if should_install() {
+        // On Windows the updater exits as soon as it starts the NSIS installer.
         crate::windows::persist_widgets_before_exit(app);
+        update
+            .install(installer)
+            .map_err(|error| error.to_string())?;
         app.restart();
     }
     Ok(())
 }
 
-/// Background startup check: store the result in `AppState` and emit `update://available`
-/// (with the info) when a newer release exists, so the widget and tray menu can surface an
-/// install button. Silent on any error (offline, endpoint missing, no release yet, etc.).
-pub async fn check_and_emit(app: &AppHandle) {
-    if let Ok(info) = check(app).await {
-        if info.available {
-            if let Some(state) = app.try_state::<AppState>() {
-                *state.update_available.lock().unwrap() = Some(info.clone());
-            }
-            let _ = app.emit("update://available", info);
+async fn check_periodically(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Ok(_install) = state.update_install.try_lock() else {
+        return;
+    };
+    let Ok(Some(update)) = find_update(app).await else {
+        return;
+    };
+    let info = update_info(&update);
+    *state.update_available.lock().unwrap() = Some(info.clone());
+    let _ = app.emit("update://available", info);
+
+    let auto_install_enabled = || {
+        !cfg!(debug_assertions) && state.settings.lock().unwrap().github_auto_install_updates
+    };
+    if auto_install_enabled() {
+        // Recheck consent after download in case the setting changed while it was in progress.
+        if let Err(error) = install_release(app, &update, auto_install_enabled).await {
+            eprintln!("Automatic update failed: {error}");
         }
     }
 }
 
-/// Check for updates on startup and then every 10 minutes, so a release published while the app
-/// is running is surfaced (widget + tray install button) without needing a restart. Idempotent:
-/// `check_and_emit` only emits when an update is available, so repeated calls are harmless.
+/// Check for updates on startup and every 10 minutes on GitHub builds.
 pub fn start_periodic(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
-            check_and_emit(&app).await;
+            check_periodically(&app).await;
             tokio::time::sleep(std::time::Duration::from_secs(600)).await;
         }
     });

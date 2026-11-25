@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.7.1] - 2026-11-25
+
+### Added
+
+- The GitHub build can install signed updates automatically when enabled in Settings. The Store build receives updates through Microsoft Store.
+
+### Fixed
+
+- The GitHub updater saves widget positions before launching the installer.
+
 ## [1.7.0] - 2026-11-24
 
 ### Added

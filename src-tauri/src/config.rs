@@ -143,6 +143,7 @@ pub struct Settings {
     pub theme: String,    // light | dark | system
     pub language: String, // auto | ko | en
     pub refresh_interval_min: u64,
+    pub github_auto_install_updates: bool,
     /// Per-service widget config, keyed by service id ("claude", "gemini", ...).
     pub widgets: HashMap<String, WidgetConfig>,
     pub notify: NotifySettings,
@@ -158,6 +159,7 @@ impl Default for Settings {
             theme: "system".to_string(),
             language: "auto".to_string(),
             refresh_interval_min: 5,
+            github_auto_install_updates: false,
             widgets: HashMap::new(),
             notify: NotifySettings::default(),
             history_retention_days: 30,
@@ -701,12 +703,15 @@ mod settings_tests {
     fn user_change_round_trips() {
         // Load legacy, apply a user change, save (serialize), reload.
         let mut s = parse_and_migrate(LEGACY);
+        assert!(!s.github_auto_install_updates, "existing installs must opt in");
+        s.github_auto_install_updates = true;
         let mut w = s.widget("claude");
         w.style = "hex-rings-detailed".to_string();
         s.widgets.insert("claude".to_string(), w);
         s.refresh_interval_min = 1;
         let bytes = serde_json::to_vec_pretty(&s).unwrap();
         let s2 = parse_and_migrate(std::str::from_utf8(&bytes).unwrap());
+        assert!(s2.github_auto_install_updates, "the opt-in must survive a restart");
         assert_eq!(s2.refresh_interval_min, 1, "interval must persist across save/load");
         assert_eq!(
             s2.widgets.get("claude").unwrap().style,

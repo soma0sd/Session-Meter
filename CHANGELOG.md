@@ -3,6 +3,16 @@
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르며, 버전은 [SemVer](https://semver.org/lang/ko/)를 따릅니다. 항목은 마이너 버전 단위로 묶습니다.
 
+## [1.7.1] - 2026-11-25
+
+### Added
+
+- GitHub판 설정에서 서명된 업데이트의 자동 설치를 켤 수 있습니다. 스토어판은 Microsoft Store에서 업데이트를 받습니다.
+
+### Fixed
+
+- GitHub판 업데이트가 설치 프로그램을 열기 전에 위젯 위치를 저장합니다.
+
 ## [1.7.0] - 2026-11-24
 
 ### Added

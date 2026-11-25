@@ -33,6 +33,7 @@
     theme: "system",
     language: "auto",
     refresh_interval_min: 5,
+    github_auto_install_updates: false,
     widgets: {},
     notify: { enabled: true, session_threshold: 80, weekly_threshold: 80, on_reset: true },
     history_retention_days: 30,
@@ -60,7 +61,7 @@
   let updateChecking = $state(false);
   let updateCheckFailed = $state(false);
   let updateInstalling = $state(false);
-  let microsoftStore = $state(false);
+  let microsoftStore = $state<boolean | null>(null);
 
   let unlisteners: Array<() => void> = [];
 
@@ -425,16 +426,34 @@
           {$t("update.current", { version })}
         {/if}
       </span>
-      {#if !microsoftStore && updateInfo?.available}
+      {#if microsoftStore === false && updateInfo?.available}
         <button class="btn primary" onclick={installUpd} disabled={updateInstalling}>
           {updateInstalling ? $t("update.installing") : $t("update.install")}
         </button>
-      {:else if !microsoftStore}
+      {:else if microsoftStore === false}
         <button class="btn" onclick={checkUpdate} disabled={updateChecking}>
           {updateChecking ? $t("update.checking") : $t(updateCheckFailed ? "update.retry" : "update.check")}
         </button>
       {/if}
     </div>
+    {#if microsoftStore === false}
+      <div class="row">
+        <div>
+          <label for="github-auto-install">{$t("update.autoInstall")}</label>
+          <p id="github-auto-install-hint" class="update-hint">{$t("update.autoInstallHint")}</p>
+        </div>
+        <input
+          type="checkbox"
+          id="github-auto-install"
+          aria-describedby="github-auto-install-hint"
+          checked={s.github_auto_install_updates}
+          onchange={(event) => {
+            s.github_auto_install_updates = event.currentTarget.checked;
+            void save();
+          }}
+        />
+      </div>
+    {/if}
     <div class="row">
       <span class="status">{$t("update.newsHint")}</span>
       <button class="btn" onclick={viewNews}>{$t("update.news")}</button>
@@ -524,6 +543,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .update-hint {
+    margin: 2px 0 0;
+    font-size: 0.75rem;
+    color: rgb(var(--fg-muted));
   }
   .acct {
     display: flex;

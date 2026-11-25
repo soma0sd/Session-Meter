@@ -122,8 +122,7 @@ pub fn run() {
             poller::start(&handle);
             windows::start_bounds_watchdog(&handle);
 
-            // Check GitHub for a newer signed release on startup and every 10 minutes; the UI
-            // surfaces it via the `update://available` event (silent if offline / no release yet).
+            // Microsoft Store handles updates for its own installs.
             if !MICROSOFT_STORE_BUILD {
                 update::start_periodic(&handle);
             }
