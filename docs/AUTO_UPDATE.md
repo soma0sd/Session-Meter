@@ -1,15 +1,23 @@
 # 자동 업데이트 설정
 
-SessionMeter는 Tauri v2 업데이터로 GitHub 릴리스 기반 자동 업데이트를 지원합니다. 코드와 설정은
-저장소에 포함되어 있으며, 실제로 활성화하려면 아래 준비가 필요합니다.
+Microsoft Store판과 GitHub판은 설치 경로별로 업데이트를 받습니다.
+
+## Microsoft Store판
+
+Microsoft Store에 새 MSIX를 제출하면 인증과 게시를 거쳐 기존 설치본에 배포됩니다. 자동 설치 여부는
+Microsoft Store의 앱 업데이트 설정에 따릅니다. 수동 확인은 Microsoft Store의 **다운로드**에서 할 수 있습니다.
+
+## GitHub판
+
+GitHub판은 Tauri v2 업데이터와 GitHub Releases를 사용합니다.
 
 ## 구성 요약
 
 - **서명 공개키**: `src-tauri/tauri.conf.json`의 `plugins.updater.pubkey`에 임베드되어 있습니다.
 - **엔드포인트**: `https://github.com/soma0sd/Session-Meter/releases/latest/download/latest.json`
   (`plugins.updater.endpoints`). 저장소 경로가 다르면 이 값을 수정하십시오.
-- **동작**: 앱은 시작 시와 이후 10분마다 자동으로 최신 릴리스를 확인하고(`update://available` 이벤트), **설정 >
-  업데이트**에서 수동으로 확인·설치할 수 있습니다.
+- **동작**: 앱은 시작 시와 이후 10분마다 자동으로 최신 릴리스를 확인합니다. 기본값은 수동 설치입니다.
+  v1.7.1부터 **설정 → 업데이트 → GitHub 업데이트 자동 설치**를 켜면 새 버전을 확인한 뒤 자동으로 설치합니다.
 - **아티팩트**: `bundle.createUpdaterArtifacts: true`로 빌드하면 설치본과 함께 `.sig` 서명,
   `latest.json` 매니페스트가 생성됩니다.
 
@@ -34,7 +42,7 @@ SessionMeter는 Tauri v2 업데이터로 GitHub 릴리스 기반 자동 업데�
 
 1. 설치된 앱이 시작 시와 이후 10분마다 `latest.json`을 확인합니다.
 2. 앱 버전보다 높은 서명 릴리스가 있으면 설정 > 업데이트에 새 버전이 표시됩니다.
-3. **지금 설치**를 누르면 서명을 검증한 뒤 설치본을 내려받아 설치하고 앱을 재시작합니다.
+3. **지금 설치**를 누르거나 자동 설치를 켜 두면 앱이 설치본을 내려받고 서명을 검증한 뒤 설치합니다. 설치가 끝나면 앱이 다시 시작됩니다.
 
 ## 주의
 

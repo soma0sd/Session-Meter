@@ -93,6 +93,7 @@ export interface Settings {
   theme: "light" | "dark" | "system";
   language: "auto" | "ko" | "en";
   refresh_interval_min: number;
+  github_auto_install_updates: boolean;
   /** Per-service widget config, keyed by service id. */
   widgets: Record<string, WidgetConfig>;
   notify: NotifySettings;
@@ -253,6 +254,7 @@ function mockSettings(): Settings {
     theme: "system",
     language: "auto",
     refresh_interval_min: 5,
+    github_auto_install_updates: false,
     widgets: {
       claude: widget(),
       codex: widget(),

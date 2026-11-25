@@ -31,6 +31,8 @@ pub struct AppState {
     pub login_capture_generation: AtomicU64,
     /// Latest available update (version + notes), set by the startup update check.
     pub update_available: Mutex<Option<crate::update::UpdateInfo>>,
+    /// Serialize manual installs with the periodic automatic install.
+    pub update_install: tokio::sync::Mutex<()>,
     /// The services the docked widget window shows right now, in placement order, as last
     /// broadcast with `dock://members` (see `dock::sync`). Kept so an unchanged recompute -
     /// every poll cycle re-runs it - does not leak out as a redundant event.
@@ -51,6 +53,7 @@ impl AppState {
             login_watching: AtomicBool::new(false),
             login_capture_generation: AtomicU64::new(0),
             update_available: Mutex::new(None),
+            update_install: tokio::sync::Mutex::new(()),
             dock_members: Mutex::new(Vec::new()),
         }
     }
