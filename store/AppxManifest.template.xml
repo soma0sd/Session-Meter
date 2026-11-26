@@ -16,6 +16,10 @@
   <Resources>
     <Resource Language="ko-KR" />
     <Resource Language="en-US" />
+    <Resource Language="ja-JP" />
+    <Resource Language="zh-CN" />
+    <Resource Language="de-DE" />
+    <Resource Language="es-ES" />
   </Resources>
   <Applications>
     <Application Id="SessionMeter" Executable="sessionmeter.exe" EntryPoint="Windows.FullTrustApplication">

@@ -1,329 +1,72 @@
-// Lightweight, dependency-free i18n for the Svelte MPA windows.
-// Korean + English. The effective locale is resolved by Rust (OS locale when "auto")
-// and pushed in via setLocale(); each window boots with a best-effort default.
+// Shared UI translations for the desktop windows and the browser preview.
 import { writable, derived, type Readable } from "svelte/store";
+import en from "./locales/en.json";
+import ko from "./locales/ko.json";
+import ja from "./locales/ja.json";
+import zhCN from "./locales/zh-CN.json";
+import de from "./locales/de.json";
+import es from "./locales/es.json";
 
-export type Locale = "ko" | "en";
-type Dict = Record<string, string>;
+export const localeNames = {
+  ko: "한국어",
+  en: "English",
+  ja: "日本語",
+  "zh-CN": "简体中文",
+  de: "Deutsch",
+  es: "Español",
+};
+export type Locale = keyof typeof localeNames;
+export type Language = Locale | "auto";
 
-const en: Dict = {
-  "app.name": "SessionMeter",
-
-  "common.settings": "Settings",
-  "common.stats": "Statistics",
-  "common.close": "Close",
-  "common.minimize": "Minimize",
-  "common.loading": "Loading...",
-  "common.remaining": "remaining",
-  "common.used": "used",
-  "common.resetsIn": "resets in {time}",
-  "common.today": "Today",
-  "common.tomorrow": "Tomorrow",
-  "common.notLoggedIn": "Not signed in",
-  "common.sessionExpired": "Session expired - please sign in again",
-  "common.usageUnavailable": "Usage temporarily unavailable",
-  "common.antigravityNotRunning": "Launch needed",
-
-  "bucket.five_hour": "Current session",
-  "bucket.seven_day": "Weekly session",
-  "bucket.seven_day_opus": "Weekly (Opus)",
-  "bucket.current": "Current usage",
-  "bucket.weekly": "Weekly limit",
-  "bucket.gemini-5h": "Gemini 5-hour",
-  "bucket.gemini-weekly": "Gemini weekly",
-  "bucket.3p-5h": "Claude/GPT 5-hour",
-  "bucket.3p-weekly": "Claude/GPT weekly",
-  "bucket.gemini-argon-wtu-weekly": "Gemini 4 Argon weekly",
-  // Group-less forms, used by the Antigravity widget only: its own switch already says
-  // which model group is on screen, so the readout names just the window. The full
-  // labels above are still what the stats window and notifications use, where several
-  // groups appear side by side and the prefix is the only thing telling them apart.
-  "bucket.window.5h": "5-hour",
-  "bucket.window.weekly": "Weekly",
-  "bucket.codex-5h": "Codex 5-hour",
-  "bucket.codex-weekly": "Codex weekly",
-
-  "menu.style": "Widget style",
-  "menu.stats": "Statistics",
-  "menu.settings": "Settings",
-  "menu.quit": "Quit SessionMeter",
-
-  "widget.alwaysOnTop": "Always on top",
-  "widget.moveLock": "Lock position",
-
-  "widgetStyle.title": "Widget style",
-  "widgetStyle.remaining": "Remaining",
-  "widgetStyle.used": "Used",
-  "widgetStyle.displayMode": "Usage display",
-  "widgetStyle.showRemaining": "Remaining",
-  "widgetStyle.showUsed": "Used",
-  "widgetStyle.opacity": "Opacity",
-  "widgetStyle.showWidget": "Show widget",
-  "widgetStyle.pickStyle": "Style",
-  "widgetStyle.preview": "Preview",
-  "widgetStyle.usage": "Usage",
-  "widgetStyle.resetIn": "Resets in",
-  "widgetStyle.noServices": "Sign in to a service to configure its widget.",
-  "widgetStyle.notLoggedIn": "Not signed in",
-  "widgetStyle.headlineGroup": "Headline group",
-  "widgetStyle.groupGemini": "Gemini",
-  "widgetStyle.groupThirdParty": "Claude/GPT",
-  "style.focusSlim.detailed": "Focus & Slim (Detailed)",
-  "style.focusSlim.compact": "Focus & Slim (Compact)",
-  "style.concentricRings.detailed": "Concentric Rings (Detailed)",
-  "style.concentricRings.compact": "Concentric Rings (Compact)",
-  "style.dualSemiArc.detailed": "Dual Semi-Arc (Detailed)",
-  "style.dualSemiArc.compact": "Dual Semi-Arc (Compact)",
-  "style.verticalPillars.detailed": "Vertical Pillars (Detailed)",
-  "style.verticalPillars.compact": "Vertical Pillars (Compact)",
-  "style.hexRings.detailed": "Hex Rings (Detailed)",
-  "style.hexRings.compact": "Hex Rings (Compact)",
-
-  "dock.tabTitle": "Placement",
-  "dock.enable": "Dock widgets together",
-  "dock.columns": "Columns",
-  "dock.order": "Order",
-  "dock.moveUp": "Move {service} up",
-  "dock.moveDown": "Move {service} down",
-  "dock.hint": "Docked widgets are combined into one window, laid out in a grid, and move together. Turning off \"Always on top\" shows the window in the taskbar.",
-  "dock.memberNote": "This widget is part of the docked window. Its opacity and \"Always on top\" are set in the Placement tab.",
-  "widget.taskbarHint": "When \"Always on top\" is off, the widget appears in the taskbar.",
-
-  "settings.title": "Settings",
-  "settings.section.general": "General",
-  "settings.section.widget": "Widget",
-  "settings.section.notifications": "Notifications",
-  "settings.section.account": "Account",
-  "settings.theme": "Theme",
-  "settings.theme.system": "System",
-  "settings.theme.light": "Light",
-  "settings.theme.dark": "Dark",
-  "settings.language": "Language",
-  "settings.language.auto": "Auto (OS)",
-  "settings.language.ko": "Korean",
-  "settings.language.en": "English",
-  "settings.refreshInterval": "Refresh interval",
-  "settings.autostart": "Launch at startup",
-  "settings.trayDisplay": "Tray shows",
-  "settings.widgetOpacity": "Widget opacity",
-  "settings.notify.enabled": "Enable notifications",
-  "settings.notify.onReset": "Notify on reset",
-  "settings.notify.sessionThreshold": "Session alert at",
-  "settings.notify.weeklyThreshold": "Weekly alert at",
-  "settings.signIn": "Sign in",
-  "settings.signOut": "Sign out",
-  "settings.loggedInAs": "Signed in: {org}",
-  "settings.signedOut": "Not signed in",
-  "settings.signingIn": "Waiting for sign-in...",
-  "settings.antigravityIde": "IDE connected",
-  "settings.antigravityCli": "Using CLI",
-  "settings.antigravityWaiting": "Not running",
-  "settings.about": "About",
-  "settings.version": "Version",
-  "settings.openStyle": "Open widget style",
-  "settings.section.update": "Updates",
-  "update.check": "Check for updates",
-  "update.checking": "Checking...",
-  "update.current": "Current: v{version}",
-  "update.upToDate": "You're up to date",
-  "update.checkFailed": "Could not check for updates",
-  "update.retry": "Retry",
-  "update.managedByStore": "Updates are managed by Microsoft Store",
-  "update.autoInstall": "Install GitHub updates automatically",
-  "update.autoInstallHint": "The app restarts when a verified update is installed.",
-  "update.available": "New version {version} available",
-  "update.install": "Install now",
-  "update.installing": "Installing...",
-  "update.news": "What's new",
-  "update.newsHint": "View the changelog",
-  "news.title": "What's New",
-  "menu.update": "Install v{version}",
-  "widget.update": "Update to v{version}",
-  "unit.minutes": "{n} min",
-
-  "stats.title": "Usage statistics",
-  "stats.forecast": "Depletion forecast",
-  "stats.history": "History",
-  "stats.historyRemaining": "Quota remaining (%)",
-  "stats.historySample": "Recorded usage at a point in time",
-  "stats.resetSchedule": "Reset schedule",
-  "stats.forecast.stable": "Stable at the current rate",
-  "stats.forecast.empties": "Empties in ~{time}",
-  "stats.forecast.beforeReset": "before reset",
-  "stats.forecast.safe": "Resets before depletion",
-  "stats.noHistory": "Not enough history yet",
-  "stats.col.window": "Window",
-  "stats.col.resetsAt": "Resets at",
-  "stats.col.in": "In",
-  "stats.used": "used",
+export const localeTags: Record<Locale, string> = {
+  ko: "ko-KR",
+  en: "en-US",
+  ja: "ja-JP",
+  "zh-CN": "zh-CN",
+  de: "de-DE",
+  es: "es-ES",
 };
 
-const ko: Dict = {
-  "app.name": "SessionMeter",
+const completeDicts = {
+  en, ko, ja, "zh-CN": zhCN, de, es,
+} satisfies Record<Locale, Record<keyof typeof en, string>>;
+const dicts: Record<Locale, Record<string, string>> = completeDicts;
 
-  "common.settings": "설정",
-  "common.stats": "통계",
-  "common.close": "닫기",
-  "common.minimize": "최소화",
-  "common.loading": "불러오는 중...",
-  "common.remaining": "남음",
-  "common.used": "사용",
-  "common.resetsIn": "{time} 후 초기화",
-  "common.today": "오늘",
-  "common.tomorrow": "내일",
-  "common.notLoggedIn": "로그인 필요",
-  "common.sessionExpired": "세션 만료 - 다시 로그인하세요",
-  "common.usageUnavailable": "사용량을 일시적으로 가져올 수 없음",
-  "common.antigravityNotRunning": "실행 필요",
-
-  "bucket.five_hour": "이번 세션",
-  "bucket.seven_day": "주간 세션",
-  "bucket.seven_day_opus": "주간 (Opus)",
-  "bucket.current": "현재 사용량",
-  "bucket.weekly": "주간 한도",
-  "bucket.gemini-5h": "Gemini 5시간",
-  "bucket.gemini-weekly": "Gemini 주간",
-  "bucket.3p-5h": "Claude/GPT 5시간",
-  "bucket.3p-weekly": "Claude/GPT 주간",
-  "bucket.gemini-argon-wtu-weekly": "Gemini 4 Argon 주간",
-  "bucket.window.5h": "5시간",
-  "bucket.window.weekly": "주간",
-  "bucket.codex-5h": "Codex 5시간",
-  "bucket.codex-weekly": "Codex 주간",
-
-  "menu.style": "위젯 스타일",
-  "menu.stats": "통계",
-  "menu.settings": "설정",
-  "menu.quit": "SessionMeter 종료",
-
-  "widget.alwaysOnTop": "항상 위",
-  "widget.moveLock": "위치 잠금",
-
-  "widgetStyle.title": "위젯 스타일",
-  "widgetStyle.remaining": "남음",
-  "widgetStyle.used": "사용",
-  "widgetStyle.displayMode": "사용량 표시",
-  "widgetStyle.showRemaining": "남은 사용량",
-  "widgetStyle.showUsed": "사용한 사용량",
-  "widgetStyle.opacity": "투명도",
-  "widgetStyle.showWidget": "위젯 표시",
-  "widgetStyle.pickStyle": "스타일",
-  "widgetStyle.preview": "미리보기",
-  "widgetStyle.usage": "사용량",
-  "widgetStyle.resetIn": "초기화 남은 시간",
-  "widgetStyle.noServices": "위젯을 설정하려면 서비스에 로그인하세요.",
-  "widgetStyle.notLoggedIn": "로그인되지 않음",
-  "widgetStyle.headlineGroup": "헤드라인 그룹",
-  "widgetStyle.groupGemini": "Gemini",
-  "widgetStyle.groupThirdParty": "Claude/GPT",
-  "style.focusSlim.detailed": "Focus & Slim (상세)",
-  "style.focusSlim.compact": "Focus & Slim (컴팩트)",
-  "style.concentricRings.detailed": "동심원 링 (상세)",
-  "style.concentricRings.compact": "동심원 링 (컴팩트)",
-  "style.dualSemiArc.detailed": "듀얼 반원 (상세)",
-  "style.dualSemiArc.compact": "듀얼 반원 (컴팩트)",
-  "style.verticalPillars.detailed": "수직 기둥 (상세)",
-  "style.verticalPillars.compact": "수직 기둥 (컴팩트)",
-  "style.hexRings.detailed": "육각 링 (상세)",
-  "style.hexRings.compact": "육각 링 (컴팩트)",
-
-  "dock.tabTitle": "배치",
-  "dock.enable": "위젯 그리드 도킹",
-  "dock.columns": "열 개수",
-  "dock.order": "순서",
-  "dock.moveUp": "{service} 위로 이동",
-  "dock.moveDown": "{service} 아래로 이동",
-  "dock.hint": "도킹된 위젯은 하나의 창 안에 격자로 배치되어 함께 이동합니다. \"항상 위\"를 끄면 창이 작업 표시줄에 표시됩니다.",
-  "dock.memberNote": "이 위젯은 도킹 창에 포함되어 있습니다. 투명도와 \"항상 위\"는 배치 탭에서 설정합니다.",
-  "widget.taskbarHint": "\"항상 위\"를 끄면 위젯이 작업 표시줄에 표시됩니다.",
-
-  "settings.title": "설정",
-  "settings.section.general": "일반",
-  "settings.section.widget": "위젯",
-  "settings.section.notifications": "알림",
-  "settings.section.account": "계정",
-  "settings.theme": "테마",
-  "settings.theme.system": "시스템",
-  "settings.theme.light": "라이트",
-  "settings.theme.dark": "다크",
-  "settings.language": "언어",
-  "settings.language.auto": "자동 (OS)",
-  "settings.language.ko": "한국어",
-  "settings.language.en": "English",
-  "settings.refreshInterval": "갱신 주기",
-  "settings.autostart": "시작 시 실행",
-  "settings.trayDisplay": "트레이 표시",
-  "settings.widgetOpacity": "위젯 투명도",
-  "settings.notify.enabled": "알림 사용",
-  "settings.notify.onReset": "초기화 시 알림",
-  "settings.notify.sessionThreshold": "이번 세션 알림 기준",
-  "settings.notify.weeklyThreshold": "주간 세션 알림 기준",
-  "settings.signIn": "로그인",
-  "settings.signOut": "로그아웃",
-  "settings.loggedInAs": "로그인됨: {org}",
-  "settings.signedOut": "로그인되지 않음",
-  "settings.signingIn": "로그인 대기 중...",
-  "settings.antigravityIde": "IDE 연결됨",
-  "settings.antigravityCli": "CLI로 조회 중",
-  "settings.antigravityWaiting": "실행 중 아님",
-  "settings.about": "정보",
-  "settings.version": "버전",
-  "settings.openStyle": "위젯 스타일 열기",
-  "settings.section.update": "업데이트",
-  "update.check": "업데이트 확인",
-  "update.checking": "확인 중...",
-  "update.current": "현재: v{version}",
-  "update.upToDate": "최신 버전입니다",
-  "update.checkFailed": "업데이트 확인 실패",
-  "update.retry": "다시 시도",
-  "update.managedByStore": "Microsoft Store에서 업데이트 관리",
-  "update.autoInstall": "GitHub 업데이트 자동 설치",
-  "update.autoInstallHint": "서명 확인을 마친 업데이트가 설치되면 앱이 다시 시작됩니다.",
-  "update.available": "새 버전 {version} 있음",
-  "update.install": "지금 설치",
-  "update.installing": "설치 중...",
-  "update.news": "업데이트 소식",
-  "update.newsHint": "변경 로그 보기",
-  "news.title": "업데이트 소식",
-  "menu.update": "v{version} 설치",
-  "widget.update": "v{version} 업데이트",
-  "unit.minutes": "{n}분",
-
-  "stats.title": "사용 통계",
-  "stats.forecast": "소진 예측",
-  "stats.history": "이력",
-  "stats.historyRemaining": "잔여율 (%)",
-  "stats.historySample": "시점별 사용량 기록",
-  "stats.resetSchedule": "초기화 일정",
-  "stats.forecast.stable": "현재 속도로는 안정적",
-  "stats.forecast.empties": "약 {time} 후 소진",
-  "stats.forecast.beforeReset": "초기화 전",
-  "stats.forecast.safe": "소진 전 초기화",
-  "stats.noHistory": "이력이 아직 부족합니다",
-  "stats.col.window": "항목",
-  "stats.col.resetsAt": "초기화 시각",
-  "stats.col.in": "남은 시간",
-  "stats.used": "사용",
-};
-
-const dicts: Record<Locale, Dict> = { en, ko };
+export function matchLocale(value: string): Locale | undefined {
+  const [language, ...subtags] = value.trim().toLowerCase().split(/[-_]/);
+  switch (language) {
+    case "ko":
+    case "en":
+    case "ja":
+    case "de":
+    case "es":
+      return language;
+    case "zh":
+      return subtags.some((tag) => ["hant", "tw", "hk", "mo"].includes(tag)) ? undefined : "zh-CN";
+    default:
+      return undefined;
+  }
+}
 
 export const locale = writable<Locale>("en");
 
-export function setLocale(l: Locale): void {
-  locale.set(l);
+export function setLocale(value: Locale): void {
+  locale.set(value);
+  document.documentElement.lang = localeTags[value];
 }
 
 export type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
-export const t: Readable<TFn> = derived(locale, ($l) => {
-  return (key: string, vars?: Record<string, string | number>): string => {
-    let s = dicts[$l][key] ?? dicts.en[key] ?? key;
-    if (vars) {
-      for (const [k, v] of Object.entries(vars)) {
-        s = s.replaceAll(`{${k}}`, String(v));
-      }
+export function translate(value: Locale, key: string, vars?: Record<string, string | number>): string {
+  let text = dicts[value][key] ?? en[key as keyof typeof en] ?? key;
+  if (vars) {
+    for (const [name, substitution] of Object.entries(vars)) {
+      text = text.replaceAll(`{${name}}`, String(substitution));
     }
-    return s;
-  };
+  }
+  return text;
+}
+
+export const t: Readable<TFn> = derived(locale, (value): TFn => {
+  return (key, vars) => translate(value, key, vars);
 });

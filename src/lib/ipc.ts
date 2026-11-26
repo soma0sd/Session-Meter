@@ -2,6 +2,7 @@
 // Outside Tauri (a plain browser preview) the getters return mock data so the UIs render
 // for visual development; this branch never runs in the packaged app.
 import { invoke } from "@tauri-apps/api/core";
+import { matchLocale, type Language, type Locale } from "./i18n";
 
 export interface WindowUsage {
   remaining: number;
@@ -91,7 +92,7 @@ export interface DockConfigPatch {
 
 export interface Settings {
   theme: "light" | "dark" | "system";
-  language: "auto" | "ko" | "en";
+  language: Language;
   refresh_interval_min: number;
   github_auto_install_updates: boolean;
   /** Per-service widget config, keyed by service id. */
@@ -240,7 +241,7 @@ function mockUsage(service?: string): UsageSnapshot {
     buckets,
     organization_name: "Preview Org",
     account_email: "you@example.com",
-    subscription: "Claude Ultra",
+    subscription: "Claude Max",
     fetched_at: iso(0),
     status: "ok",
   };
@@ -248,7 +249,8 @@ function mockUsage(service?: string): UsageSnapshot {
 function mockSettings(): Settings {
   // Browser preview only: `?style=<catalog id>` picks the widget style for every service, so
   // each style can be looked at in the widget page (widget.html?service=...&style=...).
-  const style = new URLSearchParams(location.search).get("style") || "focus-slim-detailed";
+  const params = new URLSearchParams(location.search);
+  const style = params.get("style") || "focus-slim-detailed";
   const widget = (): WidgetConfig => ({ ...defaultWidgetConfig(), style });
   return {
     theme: "system",
@@ -266,7 +268,7 @@ function mockSettings(): Settings {
     org_name: "Preview Org",
     account_email: "you@example.com",
     dock: {
-      enabled: false,
+      enabled: params.get("mode") === "dock",
       columns: 2,
       order: [],
       opacity: 0.9,
@@ -284,7 +286,7 @@ function mockHistory(): HistoryPoint[] {
     pts.push({
       at: iso(t),
       five_hour: Math.max(0, 100 - ((48 - i) % 20) * 5),
-      weekly: Math.max(0, 100 - (48 - i) * 0.8),
+      weekly: Math.max(0, Math.round(100 - (48 - i) * 0.8)),
     });
   }
   return pts;
@@ -303,7 +305,7 @@ export const getSettings = () => call<Settings>("get_settings", undefined, mockS
 export const setSettings = (settings: Settings) =>
   call<void>("set_settings", { settings }, () => undefined);
 export const getEffectiveLocale = () =>
-  call<"ko" | "en">("get_effective_locale", undefined, () => "en");
+  call<Locale>("get_effective_locale", undefined, () => matchLocale(navigator.language) ?? "en");
 
 // --- session (per service; omit the argument for the default Claude service) ---
 export const getSessionStatus = (service?: string) =>
@@ -314,9 +316,9 @@ export const getSessionStatus = (service?: string) =>
   }));
 export const getServicesStatus = () =>
   call<ServiceStatus[]>("get_services_status", undefined, () => [
-    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Ultra", live_status: "ok" },
+    { id: "claude", name: "Claude", logged_in: true, org_name: "Preview Org", email: "you@example.com", subscription: "Claude Max", live_status: "ok" },
     { id: "codex", name: "Codex", logged_in: true, org_name: "Codex", email: "", subscription: "ChatGPT Plus", live_status: "ok" },
-    { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@gmail.com", subscription: "Gemini Pro", live_status: "ok" },
+    { id: "gemini", name: "Gemini", logged_in: true, org_name: "Gemini", email: "you@example.com", subscription: "Gemini Pro", live_status: "ok" },
     { id: "antigravity_ide", name: "Antigravity", logged_in: true, org_name: "", email: "", subscription: "", live_status: "ok", antigravity_source: "ide" },
   ]);
 export const openLoginWindow = (service?: string) =>
@@ -359,7 +361,7 @@ export const setDockMoveLock = (locked: boolean) =>
 /** The services the docked window shows right now, in placement order. In the browser preview
  *  (`widget.html?mode=dock`) this is a fixed sample so the grid can be looked at. */
 export const getDockMembers = () =>
-  call<string[]>("get_dock_members", undefined, () => ["claude", "codex", "antigravity_ide"]);
+  call<string[]>("get_dock_members", undefined, () => ["claude", "codex", "gemini", "antigravity_ide"]);
 
 // --- system ---
 export const setAutostart = (enabled: boolean) =>

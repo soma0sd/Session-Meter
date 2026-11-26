@@ -92,6 +92,10 @@ try {
     $strings = @{
         'ko-KR' = @('세션미터', 'Claude, Codex, Gemini 및 Antigravity IDE 구독 한도 모니터')
         'en-US' = @('SessionMeter', 'Subscription quota monitor for Claude, Codex, Gemini and Antigravity IDE')
+        'ja-JP' = @('SessionMeter', 'Claude、Codex、Gemini、Antigravity IDE のサブスクリプション使用枠モニター')
+        'zh-CN' = @('SessionMeter', '监控 Claude、Codex、Gemini 和 Antigravity IDE 的订阅配额')
+        'de-DE' = @('SessionMeter', 'Abonnementkontingente für Claude, Codex, Gemini und Antigravity IDE überwachen')
+        'es-ES' = @('SessionMeter', 'Monitor de cuotas de suscripción para Claude, Codex, Gemini y Antigravity IDE')
     }
     foreach ($locale in $strings.Keys) {
         $dir = Join-Path $stage "Strings\$locale"

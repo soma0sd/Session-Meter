@@ -30,6 +30,14 @@
   color-scheme: light;
 }
 
+:root:lang(ja) {
+  --font-sans: "Noto Sans", "Yu Gothic UI", Meiryo, "Noto Sans KR", system-ui, sans-serif;
+}
+
+:root:lang(zh-CN) {
+  --font-sans: "Noto Sans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans KR", system-ui, sans-serif;
+}
+
 :root[data-theme="dark"] {
   /* Dark UA rendering: makes WebView2's native scrollbars dark to match. */
   color-scheme: dark;
