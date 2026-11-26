@@ -123,6 +123,9 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Se
     if settings.theme != prev.theme {
         let _ = app.emit("theme://changed", &settings.theme);
     }
+    if settings.language != prev.language {
+        let _ = app.emit("locale://changed", crate::i18n::effective_locale(&settings.language));
+    }
     let _ = app.emit("settings://changed", &settings);
     Ok(())
 }
@@ -650,20 +653,9 @@ pub fn set_theme(app: AppHandle, state: State<'_, AppState>, theme: String) {
     tray::update_tray(&app);
 }
 
-/// Effective UI locale: the explicit choice, or the OS locale mapped to ko/en when auto.
+/// Effective UI locale: the explicit choice, or the OS locale when automatic.
 #[tauri::command]
 pub fn get_effective_locale(state: State<'_, AppState>) -> String {
     let lang = state.settings.lock().unwrap().language.clone();
-    match lang.as_str() {
-        "ko" => "ko".to_string(),
-        "en" => "en".to_string(),
-        _ => {
-            let loc = tauri_plugin_os::locale().unwrap_or_default();
-            if loc.to_lowercase().starts_with("ko") {
-                "ko".to_string()
-            } else {
-                "en".to_string()
-            }
-        }
-    }
+    crate::i18n::effective_locale(&lang).to_string()
 }

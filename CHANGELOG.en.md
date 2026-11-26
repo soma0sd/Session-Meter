@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), this project adheres to
 [Semantic Versioning](https://semver.org/), and entries are grouped by minor version.
 
+## [1.8.0] - 2026-11-26
+
+### Added
+
+- Added Japanese, Simplified Chinese, German, and Spanish. Choose from six languages, including Korean and English, in Settings.
+- Automatic language selection recognizes supported Windows display languages. Language changes apply to open windows and notifications.
+
 ## [1.7.1] - 2026-11-25
 
 ### Added

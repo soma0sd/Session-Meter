@@ -141,7 +141,7 @@ impl Default for DockConfig {
 #[serde(default)]
 pub struct Settings {
     pub theme: String,    // light | dark | system
-    pub language: String, // auto | ko | en
+    pub language: String, // "auto" or a supported locale
     pub refresh_interval_min: u64,
     pub github_auto_install_updates: bool,
     /// Per-service widget config, keyed by service id ("claude", "gemini", ...).

@@ -3,8 +3,10 @@
 // preview (no Tauri backend), falling back to system theme + navigator language.
 import { getSettings, getEffectiveLocale, type Settings } from "./ipc";
 import { applyTheme, theme as themeStore } from "./theme";
-import { setLocale, type Locale } from "./i18n";
+import { matchLocale, setLocale } from "./i18n";
 import { settings as settingsStore } from "./stores";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export async function initWindow(): Promise<Settings | null> {
   const appearance = getSettings().then((s) => {
@@ -16,18 +18,23 @@ export async function initWindow(): Promise<Settings | null> {
     applyTheme("system");
     return null;
   });
-  // Dev/preview override: ?lang=ko or ?lang=en.
-  const override = new URLSearchParams(location.search).get("lang");
-  if (override === "ko" || override === "en") {
+  // A browser preview may select any supported language with ?lang=.
+  const override = matchLocale(new URLSearchParams(location.search).get("lang") ?? "");
+  if (override) {
     setLocale(override);
     return appearance;
   }
+  if (isTauri()) {
+    void listen<string>("locale://changed", ({ payload }) => {
+      setLocale(matchLocale(payload) ?? "en");
+    }).then((unlisten) => {
+      window.addEventListener("pagehide", unlisten, { once: true });
+    }).catch(() => {});
+  }
   try {
-    const loc = await getEffectiveLocale();
-    setLocale(loc as Locale);
+    setLocale(await getEffectiveLocale());
   } catch {
-    const nav = (navigator.language || "en").toLowerCase();
-    setLocale(nav.startsWith("ko") ? "ko" : "en");
+    setLocale(matchLocale(navigator.language) ?? "en");
   }
   return appearance;
 }

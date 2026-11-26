@@ -1,53 +1,73 @@
-//! Minimal Rust-side i18n for strings that Rust emits natively (tray tooltip,
-//! notifications). The frontend has its own richer dictionary; this only covers the
-//! handful of strings produced outside the webview.
+//! Localized tray and notification messages use the same dictionaries as the UI.
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
-/// Map the language setting to an effective locale (auto -> OS locale -> ko/en).
-pub fn effective_locale(language: &str) -> &'static str {
-    match language {
-        "ko" => "ko",
-        "en" => "en",
-        _ => {
-            let l = tauri_plugin_os::locale().unwrap_or_default().to_lowercase();
-            if l.starts_with("ko") {
-                "ko"
-            } else {
-                "en"
-            }
-        }
+type Dictionary = HashMap<String, String>;
+
+fn dictionaries() -> &'static [Dictionary; 6] {
+    static DICTIONARIES: OnceLock<[Dictionary; 6]> = OnceLock::new();
+    DICTIONARIES.get_or_init(|| {
+        [
+            include_str!("../../src/lib/locales/en.json"),
+            include_str!("../../src/lib/locales/ko.json"),
+            include_str!("../../src/lib/locales/ja.json"),
+            include_str!("../../src/lib/locales/zh-CN.json"),
+            include_str!("../../src/lib/locales/de.json"),
+            include_str!("../../src/lib/locales/es.json"),
+        ]
+        .map(|source| serde_json::from_str(source).expect("invalid bundled locale dictionary"))
+    })
+}
+
+fn lookup(loc: &str, key: &str) -> Option<&'static str> {
+    let index = match loc {
+        "ko" => 1,
+        "ja" => 2,
+        "zh-CN" => 3,
+        "de" => 4,
+        "es" => 5,
+        _ => 0,
+    };
+    let values = dictionaries();
+    values[index]
+        .get(key)
+        .or_else(|| values[0].get(key))
+        .map(String::as_str)
+}
+
+fn text(loc: &str, key: &str) -> &'static str {
+    lookup(loc, key).expect("missing bundled native translation")
+}
+
+fn match_locale(language: &str) -> Option<&'static str> {
+    let normalized = language.trim().to_ascii_lowercase();
+    let mut parts = normalized.split(['-', '_']);
+    match parts.next()? {
+        "ko" => Some("ko"),
+        "en" => Some("en"),
+        "ja" => Some("ja"),
+        "de" => Some("de"),
+        "es" => Some("es"),
+        "zh" if !parts.any(|tag| matches!(tag, "hant" | "tw" | "hk" | "mo")) => Some("zh-CN"),
+        _ => None,
     }
+}
+
+/// Resolve the saved choice or use the OS language when set to automatic.
+pub fn effective_locale(language: &str) -> &'static str {
+    match_locale(language)
+        .or_else(|| tauri_plugin_os::locale().as_deref().and_then(match_locale))
+        .unwrap_or("en")
 }
 
 #[allow(dead_code)]
 pub fn bucket_label(loc: &str, key: &str, fallback: &str) -> String {
-    match (loc, key) {
-        ("ko", "five_hour") => "이번 세션".to_string(),
-        ("ko", "seven_day") => "주간 세션".to_string(),
-        ("ko", "codex-5h") => "Codex 5시간".to_string(),
-        ("ko", "codex-weekly") => "Codex 주간".to_string(),
-        // Antigravity's four model-group buckets. Without these the desktop notification was
-        // the one place that still showed an English label (the API's own `displayName`, or
-        // `antigravity::humanize`); the widget and stats windows translate via src/lib/i18n.ts.
-        ("ko", "gemini-5h") => "Gemini 5시간".to_string(),
-        ("ko", "gemini-weekly") => "Gemini 주간".to_string(),
-        ("ko", "3p-5h") => "Claude/GPT 5시간".to_string(),
-        ("ko", "3p-weekly") => "Claude/GPT 주간".to_string(),
-        ("ko", "gemini-argon-wtu-weekly") => "Gemini 4 Argon 주간".to_string(),
-        ("en", "five_hour") => "Current session".to_string(),
-        ("en", "seven_day") => "Weekly session".to_string(),
-        ("en", "codex-5h") => "Codex 5-hour".to_string(),
-        ("en", "codex-weekly") => "Codex weekly".to_string(),
-        ("en", "gemini-5h") => "Gemini 5-hour".to_string(),
-        ("en", "gemini-weekly") => "Gemini weekly".to_string(),
-        ("en", "3p-5h") => "Claude/GPT 5-hour".to_string(),
-        ("en", "3p-weekly") => "Claude/GPT weekly".to_string(),
-        ("en", "gemini-argon-wtu-weekly") => "Gemini 4 Argon weekly".to_string(),
-        _ => fallback.to_string(),
-    }
+    lookup(loc, &format!("bucket.{key}"))
+        .unwrap_or(fallback)
+        .to_string()
 }
 
-/// Short "time until reset" from an ISO-8601 timestamp (e.g. "4d 12h" / "2시간 45분").
-/// Empty when the timestamp is missing/unparseable.
+/// Format the time until reset, or return an empty string for an invalid timestamp.
 #[allow(dead_code)]
 pub fn fmt_countdown(loc: &str, resets_at: &str) -> String {
     let Some(target) = crate::history::parse_iso(resets_at) else {
@@ -59,77 +79,82 @@ pub fn fmt_countdown(loc: &str, resets_at: &str) -> String {
     let days = secs / 86_400;
     let hours = (secs % 86_400) / 3600;
     let mins = (secs % 3600) / 60;
-    if loc == "ko" {
-        if days > 0 {
-            format!("{days}일 {hours}시간")
-        } else if hours > 0 {
-            format!("{hours}시간 {mins}분")
-        } else {
-            format!("{mins}분")
-        }
-    } else if days > 0 {
-        format!("{days}d {hours}h")
+    if days > 0 {
+        text(loc, "time.daysHours")
+            .replace("{d}", &days.to_string())
+            .replace("{h}", &hours.to_string())
     } else if hours > 0 {
-        format!("{hours}h {mins}m")
+        text(loc, "time.hoursMinutes")
+            .replace("{h}", &hours.to_string())
+            .replace("{m}", &mins.to_string())
     } else {
-        format!("{mins}m")
+        text(loc, "time.minutes").replace("{m}", &mins.to_string())
     }
 }
 
-/// One tray-tooltip bucket line: "  Current session: 62% left · resets in 1h 59m".
 #[allow(dead_code)]
 pub fn tooltip_line(loc: &str, label: &str, remaining: u8, countdown: &str) -> String {
-    let base = if loc == "ko" {
-        format!("  {label}: {remaining}% 남음")
-    } else {
-        format!("  {label}: {remaining}% left")
-    };
+    let value = text(loc, "native.tooltip.remaining").replace("{value}", &remaining.to_string());
     if countdown.is_empty() {
-        base
-    } else if loc == "ko" {
-        format!("{base} · {countdown} 후 초기화")
+        format!("  {label}: {value}")
     } else {
-        format!("{base} · resets in {countdown}")
+        let reset = text(loc, "common.resetsIn").replace("{time}", countdown);
+        format!("  {label}: {value} · {reset}")
     }
 }
 
 #[allow(dead_code)]
 pub fn tooltip_signed_out(loc: &str) -> &'static str {
-    if loc == "ko" {
-        "SessionMeter - 로그인 필요"
-    } else {
-        "SessionMeter - not signed in"
-    }
+    text(loc, "native.tooltip.signedOut")
 }
 
 pub fn notify_approaching_title(loc: &str) -> &'static str {
-    if loc == "ko" {
-        "SessionMeter · 사용량 경고"
-    } else {
-        "SessionMeter · Usage warning"
-    }
+    text(loc, "native.notify.warning")
 }
 
 pub fn notify_approaching_body(loc: &str, label: &str, used: u8) -> String {
-    if loc == "ko" {
-        format!("{label}: {used}% 사용됨")
-    } else {
-        format!("{label}: {used}% used")
-    }
+    text(loc, "native.notify.used")
+        .replace("{value}", &used.to_string())
+        .replace("{label}", label)
 }
 
 pub fn notify_reset_title(loc: &str) -> &'static str {
-    if loc == "ko" {
-        "SessionMeter · 사용량 초기화"
-    } else {
-        "SessionMeter · Usage reset"
-    }
+    text(loc, "native.notify.reset")
 }
 
 pub fn notify_reset_body(loc: &str, label: &str) -> String {
-    if loc == "ko" {
-        format!("{label} 사용량이 초기화되었습니다")
-    } else {
-        format!("{label} has reset")
+    text(loc, "native.notify.resetBody").replace("{label}", label)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_system_languages_and_rejects_traditional_chinese() {
+        for (raw, expected) in [
+            ("ko-KR", Some("ko")),
+            ("EN_us", Some("en")),
+            ("ja-JP", Some("ja")),
+            ("zh-Hans-SG", Some("zh-CN")),
+            ("de-AT", Some("de")),
+            ("es-MX", Some("es")),
+            ("zh-Hant-TW", None),
+            ("fr-FR", None),
+        ] {
+            assert_eq!(match_locale(raw), expected);
+        }
+    }
+
+    #[test]
+    fn native_notification_uses_the_selected_language() {
+        assert_eq!(
+            notify_approaching_body("es", &bucket_label("es", "codex-weekly", ""), 82),
+            "Codex semanal: 82 % usado"
+        );
+        assert_eq!(
+            notify_reset_body("zh-CN", &bucket_label("zh-CN", "five_hour", "")),
+            "当前会话用量已重置"
+        );
     }
 }

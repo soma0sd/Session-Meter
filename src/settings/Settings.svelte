@@ -4,7 +4,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
   import { version as bundledVersion } from "../../package.json";
-  import { t, setLocale, type Locale } from "../lib/i18n";
+  import { t, setLocale, localeNames, matchLocale, type Language } from "../lib/i18n";
   import { initWindow } from "../lib/appinit";
   import { applyTheme, type Theme } from "../lib/theme";
   import TitleBar from "../lib/TitleBar.svelte";
@@ -135,20 +135,12 @@
     await save();
   }
 
-  async function onLanguage(v: "auto" | "ko" | "en") {
+  async function onLanguage(v: Language) {
     s.language = v;
     await save();
-    let loc: Locale = "en";
-    if (v === "auto") {
-      try {
-        loc = await getEffectiveLocale();
-      } catch {
-        loc = (navigator.language || "en").toLowerCase().startsWith("ko") ? "ko" : "en";
-      }
-    } else {
-      loc = v;
-    }
-    setLocale(loc);
+    setLocale(v === "auto"
+      ? await getEffectiveLocale().catch(() => matchLocale(navigator.language) ?? "en")
+      : v);
   }
 
   async function onAutostart(v: boolean) {
@@ -316,10 +308,11 @@
 
     <div class="row">
       <label for="lang">{$t("settings.language")}</label>
-      <select id="lang" value={s.language} onchange={(e) => onLanguage(e.currentTarget.value as "auto" | "ko" | "en")}>
+      <select id="lang" value={s.language} onchange={(e) => onLanguage(e.currentTarget.value as Language)}>
         <option value="auto">{$t("settings.language.auto")}</option>
-        <option value="ko">{$t("settings.language.ko")}</option>
-        <option value="en">{$t("settings.language.en")}</option>
+        {#each Object.entries(localeNames) as [value, name] (value)}
+          <option {value}>{name}</option>
+        {/each}
       </select>
     </div>
 

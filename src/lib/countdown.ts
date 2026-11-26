@@ -1,3 +1,5 @@
+import { translate, type Locale } from "./i18n";
+
 // Format the time remaining until an ISO-8601 reset timestamp.
 export function msUntil(isoResetsAt: string): number {
   const t = Date.parse(isoResetsAt);
@@ -5,7 +7,7 @@ export function msUntil(isoResetsAt: string): number {
   return Math.max(0, t - Date.now());
 }
 
-export function formatCountdown(ms: number, locale: "ko" | "en" = "en"): string {
+export function formatCountdown(ms: number, locale: Locale = "en"): string {
   // Guard against a missing/invalid reset time (e.g. a fresh session with no resets_at yet),
   // which would otherwise render as "NaN...".
   if (!Number.isFinite(ms)) return "-";
@@ -14,14 +16,9 @@ export function formatCountdown(ms: number, locale: "ko" | "en" = "en"): string 
   const h = Math.floor((totalSec % 86400) / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  if (locale === "ko") {
-    if (d > 0) return `${d}일 ${h}시간`;
-    if (h > 0) return `${h}시간 ${m}분`;
-    return `${m}분 ${s}초`;
-  }
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m ${s}s`;
+  if (d > 0) return translate(locale, "time.daysHours", { d, h });
+  if (h > 0) return translate(locale, "time.hoursMinutes", { h, m });
+  return translate(locale, "time.minutesSeconds", { m, s });
 }
 
 // Clock-style remaining time for the compact widget infographics: "D:HH:MM" from a day out,

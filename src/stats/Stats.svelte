@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { t, locale } from "../lib/i18n";
+  import { t, locale, localeTags } from "../lib/i18n";
   import { initWindow } from "../lib/appinit";
   import { applyTheme, type Theme } from "../lib/theme";
   import TitleBar from "../lib/TitleBar.svelte";
@@ -142,7 +142,7 @@
     void loadHistory();
   }
 
-  const localeTag = $derived($locale === "ko" ? "ko-KR" : "en-US");
+  const localeTag = $derived(localeTags[$locale]);
   function fmtTime(iso: string): string {
     return formatResetDateTime(iso, localeTag, $t("common.today"), $t("common.tomorrow")) || "-";
   }
