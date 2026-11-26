@@ -7,6 +7,10 @@
   <a href="https://v2.tauri.app/">Tauri v2</a> + Svelte로 제작했으며 MIT 라이선스로 배포합니다.
 </p>
 
+<p align="center">
+  <a href="https://apps.microsoft.com/detail/9PC2WL8QS4W0"><strong>Microsoft Store에서 무료 설치</strong></a>
+</p>
+
 ---
 
 > [!WARNING]
@@ -78,8 +82,13 @@
 
 ## 설치
 
-SessionMeter는 Windows 10/11용 무료 앱입니다. GitHub에서 설치할 수 있으며, Microsoft Store에서는
-**세션미터**라는 이름으로 무료 출시를 준비하고 있습니다.
+SessionMeter는 Windows 10/11용 무료 앱입니다.
+
+### Microsoft Store
+
+Microsoft Store에 **세션미터**라는 이름으로 출시했습니다. [Microsoft Store에서 무료 설치](https://apps.microsoft.com/detail/9PC2WL8QS4W0)를 눌러 제품 페이지를 여십시오.
+
+### GitHub Releases
 
 1. **[최신 릴리스 페이지](https://github.com/soma0sd/Session-Meter/releases/latest)** 로 이동합니다.
 2. **Assets** 목록에서 `SessionMeter_x.y.z_x64-setup.exe`(NSIS 설치 프로그램)를 내려받습니다
@@ -93,7 +102,7 @@ SessionMeter는 Windows 10/11용 무료 앱입니다. GitHub에서 설치할 수
 | 설치 경로 | 업데이트 |
 | --- | --- |
 | GitHub Releases | 앱이 시작할 때와 이후 10분마다 업데이트를 확인합니다. 설치 버튼으로 수동 설치하거나, v1.7.1부터 **설정 → 업데이트 → GitHub 업데이트 자동 설치**를 켤 수 있습니다. 자동 설치가 끝나면 앱이 다시 시작됩니다. |
-| Microsoft Store (출시 준비 중) | Store의 앱 업데이트 설정에 따라 자동으로 설치합니다. 수동 확인은 Microsoft Store의 **다운로드**에서 할 수 있습니다. |
+| Microsoft Store | Store의 앱 업데이트 설정에 따라 자동으로 설치합니다. 수동 확인은 Microsoft Store의 **다운로드**에서 할 수 있습니다. |
 
 ## 개발
 
